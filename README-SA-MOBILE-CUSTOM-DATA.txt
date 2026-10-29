@@ -19,5 +19,3 @@ The three SASCM INI files are loaded as additional opcode definitions for the co
 Opcode IDs already present in the selected built-in opcode database are retained; INI entries can
 add opcode IDs missing from that database. If a custom SASCM.CLEO.ini is absent, the bundled CLEO
 INI is used as a fallback for the PC target.
-
-All three bare aliases compile to 004E: terminate_this_script, avoiding the unsupported 0A93 opcode.
