@@ -5,13 +5,14 @@ An unofficial Sanny Builder port for Android, written in Java. It allows you to 
 ## Features
 
 - Write and edit CLEO scripts on Android
-- Syntax highlighting for CLEO opcodes
 - Support for GTA: San Andreas Android CLEO scripts
 - Compatible with Android versions up to Android 13
+- Dark Theme for editor
+- Syntax highlighting using Kali Linux Dark by Arie-SR91 (Me)
 
 ## Requirements
 
-- Android device running Android 14 or lower
+- Android device running Android 13 or lower
 - GTA: San Andreas Android with CLEO library installed
 
 ## Dependencies
@@ -29,9 +30,9 @@ An unofficial Sanny Builder port for Android, written in Java. It allows you to 
 
 Now you can type if, jf, jump, etc. without the code in front of it.
 
-- Dark Theme for editor
-- Syntax highlighting using Kali Linux Dark by Arie-SR91 (Me)
 - Parser for normal Sanny Builder commands like if, jf, jump etc.
+- Parser for math oprator and expression like 2@ == 1, 2@ >= 1, etc
+- And more
 
 The code is plain Java without Android classes (package `com.fastsmartsystem.cleo`), so it can be checked on a desktop JVM: a similar engine
 lives in [cleo-script-java](https://github.com/FSSRepo/cleo-script-java), whose tests decompile and recompile real `.cs` files.
