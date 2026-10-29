@@ -34,6 +34,15 @@ Now you can type if, jf, jump, etc. without the code in front of it.
 - Parser for math oprator and expression like 2@ == 1, 2@ >= 1, etc
 - And more
 
+Custom data folder:
+  /sdcard/sr-builder/sa_mobile/
+
+Optional custom files read from this folder:
+  peds.ide
+  vehicles.ide
+  opcodes.txt
+  SASCM.ini
+
 ## Disclaimer
 
 This is an unofficial tool and is not affiliated with Sanny Builder or Rockstar Games.
