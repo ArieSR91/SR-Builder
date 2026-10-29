@@ -42,4 +42,6 @@ I am not the developer of this apps, I only modified and rebuilt it from existin
 
 ## License
 
-This project is open source. See the repository for license details.
+This project is open source.
+
+See the [LICENSE](LICENSE) file for details.
