@@ -1,4 +1,4 @@
-# Cleo Editor for Android
+# SR-Builder Cleo Editor for Android
 
 An unofficial Sanny Builder port for Android, written in Java. It allows you to write, edit, and manage CLEO scripts directly on your Android device.
 
@@ -40,6 +40,7 @@ lives in [cleo-script-java](https://github.com/FSSRepo/cleo-script-java), whose 
 ## Disclaimer
 
 This is an unofficial tool and is not affiliated with Sanny Builder or Rockstar Games.
+I am not the developer of this apps, I only modified and rebuilt it from existing source code by FSSRepo.
 
 ## License
 
