@@ -34,9 +34,6 @@ Now you can type if, jf, jump, etc. without the code in front of it.
 - Parser for math oprator and expression like 2@ == 1, 2@ >= 1, etc
 - And more
 
-The code is plain Java without Android classes (package `com.fastsmartsystem.cleo`), so it can be checked on a desktop JVM: a similar engine
-lives in [cleo-script-java](https://github.com/FSSRepo/cleo-script-java), whose tests decompile and recompile real `.cs` files.
-
 ## Disclaimer
 
 This is an unofficial tool and is not affiliated with Sanny Builder or Rockstar Games.
