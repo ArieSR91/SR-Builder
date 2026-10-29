@@ -38,17 +38,23 @@ public class CLEOLanguage {
         return SYNTAX_SYMBOLS;
     }
 
-    private static final Pattern SYNTAX_BRACKETS = Pattern.compile("\\{(.*?)\\}");
+    private static final Pattern SYNTAX_BRACKETS = Pattern.compile("\\{(.*?)\\}|#\\w+");
 
     public final Pattern getSyntaxBrackets() {
         return SYNTAX_BRACKETS;
     }
 
     private static final Pattern SYNTAX_KEYWORDS = Pattern.compile(
-            "\\d+\\@|[sv][$@]\\d+|\\$\\w+|(?<=\\b)((jump)|(jump_if_false)|(if)|(not))(?=\\b)"); // CASE_INSENSITIVE
+            "(?i)(?<=\\b)((jump)|(jump_if_false)|(goto_if_false)|(jf)|(goto)|(gosub)|(return)|(wait)|(if)|(and)|(or)|(then)|(else)|(end)|(while)|(not)|(script_name)|(thread)|(terminate_this_script)|(terminate_this_custom_script)|(end_thread)|(alloc)|(var)|(hex))(?=\\b)");
 
     public final Pattern getSyntaxKeywords() {
         return SYNTAX_KEYWORDS;
+    }
+
+    private static final Pattern SYNTAX_VARIABLES = Pattern.compile("\\d+@|[sv][$@]\\d+|(?<!\\{)\\$\\w+");
+
+    public final Pattern getSyntaxVariables() {
+        return SYNTAX_VARIABLES;
     }
 
     // Label Paint

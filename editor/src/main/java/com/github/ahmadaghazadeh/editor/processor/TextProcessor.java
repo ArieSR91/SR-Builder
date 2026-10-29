@@ -56,7 +56,7 @@ import android.view.VelocityTracker;
 import android.view.View;
 import android.view.ViewConfiguration;
 import android.view.inputmethod.EditorInfo;
-import android.widget.Scroller;
+import android.widget.OverScroller;
 import android.widget.TextView;
 
 import com.github.ahmadaghazadeh.editor.R;
@@ -103,6 +103,22 @@ public class TextProcessor extends AppCompatMultiAutoCompleteTextView implements
     String mOldText;
     float mPreviousTouchX = 0.0f;
     float mPreviousTouchY = 0.0f;
+    private float mTouchDownX = 0.0f;
+    private float mTouchDownY = 0.0f;
+    private boolean mHorizontalScrollGesture = false;
+    private boolean mVerticalScrollGesture = false;
+    private boolean mTouchStartedOnCursorHandle = false;
+    private boolean mTouchDownDispatched = false;
+    private MotionEvent mDeferredDownEvent;
+    private final Handler mTouchHandler = new Handler();
+    private final Runnable mDispatchDeferredDown = new Runnable() {
+        @Override public void run() {
+            dispatchDeferredDownEvent();
+        }
+    };
+    private int mTouchDownSelectionStart = -1;
+    private int mTouchDownSelectionEnd = -1;
+    private int mHorizontalTouchSlop;
     int mMaximumVelocity;
     int mGutterWidth;
     int mLineNumberDigitCount = 0;
@@ -118,7 +134,7 @@ public class TextProcessor extends AppCompatMultiAutoCompleteTextView implements
     private CodeEditor codeEditor;
     private ClipboardManager mClipboardManager;
     private Context mContext;
-    private Scroller mScroller;
+    private OverScroller mScroller;
     private OnScrollChangedListener[] mScrollChangedListeners;
     private VelocityTracker mVelocityTracker;
     private LineUtils mLineUtils;
@@ -136,6 +152,7 @@ public class TextProcessor extends AppCompatMultiAutoCompleteTextView implements
     private StyleSpan mSyntaxSymbols;
     private StyleSpan mSyntaxBrackets;
     private StyleSpan mSyntaxKeywords;
+    private StyleSpan mSyntaxVariables;
     private StyleSpan mSyntaxMethods;
     private StyleSpan mSyntaxStrings;
     private StyleSpan mSyntaxComments;
@@ -212,7 +229,7 @@ public class TextProcessor extends AppCompatMultiAutoCompleteTextView implements
     protected void initParameters() {
         defaultSetting = new DefaultSetting(mContext);
         mClipboardManager = (ClipboardManager) mContext.getSystemService(Context.CLIPBOARD_SERVICE);
-        mScroller = new Scroller(mContext);
+        mScroller = new OverScroller(mContext);
         mScrollChangedListeners = new OnScrollChangedListener[0];
         mLineUtils = new LineUtils();
     }
@@ -320,6 +337,7 @@ public class TextProcessor extends AppCompatMultiAutoCompleteTextView implements
                 color = getContext().getResources().getColor(R.color.syntaxKeywords);
         }
         mSyntaxKeywords = new StyleSpan(color, false, false);
+        mSyntaxVariables = new StyleSpan(0xFF00A2FF, false, false);
 
         colorAttr = new TypedValue();
 
@@ -391,6 +409,7 @@ public class TextProcessor extends AppCompatMultiAutoCompleteTextView implements
     protected void initMethods() {
         ViewConfiguration configuration = ViewConfiguration.get(mContext);
         mMaximumVelocity = configuration.getScaledMaximumFlingVelocity() * 100;
+        mHorizontalTouchSlop = configuration.getScaledTouchSlop();
         mIdealMargin = Converter.dpAsPixels(this, 4);
         setImeOptions(EditorInfo.IME_FLAG_NO_EXTRACT_UI);
         setOnKeyListener(this);
@@ -486,6 +505,17 @@ public class TextProcessor extends AppCompatMultiAutoCompleteTextView implements
         }
     }
 
+    /**
+     * Keep the editor viewport where the user positioned it while typing.
+     * TextView normally scrolls automatically to bring the caret into view;
+     * for this code editor that makes the visible text jump to the end of a
+     * long line. Manual scrolling is still handled by the editor's touch logic.
+     */
+    @Override
+    public boolean bringPointIntoView(int offset) {
+        return false;
+    }
+
     @Override
     public void onSelectionChanged(int selStart, int selEnd) {
         super.onSelectionChanged(selStart, selEnd);
@@ -537,12 +567,8 @@ public class TextProcessor extends AppCompatMultiAutoCompleteTextView implements
             }
         } else {
             switch (keyCode) {
-                case KeyEvent.KEYCODE_TAB: // TAB
-                    int start, end;
-                    start = Math.max(getSelectionStart(), 0);
-                    end = Math.max(getSelectionEnd(), 0);
-                    getText().replace(Math.min(start, end),
-                            Math.max(start, end), TAB_STR, 0, TAB_STR.length());
+                case KeyEvent.KEYCODE_TAB: // TAB / Shift+TAB
+                    indentSelectedLines(event.isShiftPressed());
                     return true;
                 default:
                     try {
@@ -553,6 +579,77 @@ public class TextProcessor extends AppCompatMultiAutoCompleteTextView implements
                     return false;
             }
         }
+    }
+
+    /** Indents or outdents every line touched by the current selection. */
+    private void indentSelectedLines(boolean outdent) {
+        Editable text = getText();
+        if (text == null) return;
+
+        int selectionStart = Math.max(0, getSelectionStart());
+        int selectionEnd = Math.max(0, getSelectionEnd());
+        int start = Math.min(selectionStart, selectionEnd);
+        int end = Math.max(selectionStart, selectionEnd);
+
+        // With no selection, Tab inserts four spaces; Shift+Tab removes up to
+        // four leading spaces from the current line.
+        if (start == end) {
+            int lineStart = text.toString().lastIndexOf('\n', Math.max(0, start - 1)) + 1;
+            if (!outdent) {
+                text.insert(start, TAB_STR);
+                Selection.setSelection(text, start + TAB_STR.length());
+            } else {
+                int remove = 0;
+                while (remove < TAB_STR.length() && lineStart + remove < text.length()
+                        && text.charAt(lineStart + remove) == ' ') remove++;
+                if (remove > 0) {
+                    int cursor = Math.max(lineStart, start - Math.min(remove, start - lineStart));
+                    text.delete(lineStart, lineStart + remove);
+                    Selection.setSelection(text, Math.max(lineStart, cursor));
+                }
+            }
+            return;
+        }
+
+        String original = text.toString();
+        int firstLineStart = original.lastIndexOf('\n', Math.max(0, start - 1)) + 1;
+        int lastSelectedChar = Math.max(start, end - 1);
+        int lastLineEnd = original.indexOf('\n', lastSelectedChar);
+        if (lastLineEnd < 0) lastLineEnd = original.length();
+        else lastLineEnd++; // include newline to keep following lines unchanged
+
+        String block = original.substring(firstLineStart, lastLineEnd);
+        String[] lines = block.split("\n", -1);
+        StringBuilder changed = new StringBuilder(block.length() + lines.length * 4);
+        int addedAtStart = 0;
+        int totalDelta = 0;
+        for (int i = 0; i < lines.length; i++) {
+            String line = lines[i];
+            if (i == lines.length - 1 && line.isEmpty() && block.endsWith("\n")) {
+                changed.append(line);
+                continue;
+            }
+            if (outdent) {
+                int remove = 0;
+                while (remove < TAB_STR.length() && remove < line.length()
+                        && line.charAt(remove) == ' ') remove++;
+                if (remove > 0) line = line.substring(remove);
+                totalDelta -= remove;
+            } else {
+                line = TAB_STR + line;
+                totalDelta += TAB_STR.length();
+                if (i == 0) addedAtStart = TAB_STR.length();
+            }
+            changed.append(line);
+            if (i < lines.length - 1) changed.append('\n');
+        }
+
+        text.replace(firstLineStart, lastLineEnd, changed.toString());
+        int newStart = Math.max(firstLineStart, start + (outdent ? 0 : addedAtStart));
+        int newEnd = Math.max(newStart, end + totalDelta);
+        newStart = Math.min(newStart, text.length());
+        newEnd = Math.min(newEnd, text.length());
+        Selection.setSelection(text, newStart, newEnd);
     }
 
     //endregion BASE_METHODS
@@ -829,59 +926,224 @@ public class TextProcessor extends AppCompatMultiAutoCompleteTextView implements
 
     @Override
     public boolean onTouchEvent(MotionEvent event) {
-        switch (event.getAction()) {
+        switch (event.getActionMasked()) {
             case MotionEvent.ACTION_DOWN:
-                if (!mScroller.isFinished()) {
-                    mScroller.abortAnimation();
-                }
-                if (mVelocityTracker == null) {
-                    mVelocityTracker = VelocityTracker.obtain();
+                if (!mScroller.isFinished()) mScroller.abortAnimation();
+                if (mVelocityTracker == null) mVelocityTracker = VelocityTracker.obtain();
+                else mVelocityTracker.clear();
+                mVelocityTracker.addMovement(event);
+                mTouchDownX = mPreviousTouchX = event.getX();
+                mTouchDownY = mPreviousTouchY = event.getY();
+                mHorizontalScrollGesture = false;
+                mVerticalScrollGesture = false;
+                mTouchDownSelectionStart = getSelectionStart();
+                mTouchDownSelectionEnd = getSelectionEnd();
+                mTouchStartedOnCursorHandle = isTouchNearCursorHandle(event.getX(), event.getY());
+                mTouchDownDispatched = false;
+                cancelDeferredDownEvent();
+                if (mTouchStartedOnCursorHandle) {
+                    // Keep Android's native insertion-handle drag behavior intact.
+                    mTouchDownDispatched = true;
+                    super.onTouchEvent(event);
                 } else {
-                    mVelocityTracker.clear();
+                    // Do not let TextView move the caret on ACTION_DOWN. Wait until we know
+                    // whether this is a tap, a long press, or a horizontal viewport swipe.
+                    mDeferredDownEvent = MotionEvent.obtain(event);
+                    mTouchHandler.postDelayed(mDispatchDeferredDown, 2500L);
+                }
+                break;
+            case MotionEvent.ACTION_MOVE:
+                if (mVelocityTracker != null) mVelocityTracker.addMovement(event);
+                float dxFromDown = event.getX() - mTouchDownX;
+                float dyFromDown = event.getY() - mTouchDownY;
+                boolean crossedHorizontalSlop = Math.abs(dxFromDown) > mHorizontalTouchSlop;
+                boolean crossedVerticalSlop = Math.abs(dyFromDown) > mHorizontalTouchSlop;
+                if (!mTouchStartedOnCursorHandle
+                        && !mHorizontalScrollGesture && !mVerticalScrollGesture
+                        && (crossedHorizontalSlop || crossedVerticalSlop)) {
+                    // Lock the gesture based on its initial direction. A vertical-first
+                    // swipe remains vertical-only. A horizontal-first swipe enables both
+                    // axes, so the user can continue moving up/down and left/right without
+                    // lifting the finger or starting a second gesture.
+                    boolean horizontalFirst = crossedHorizontalSlop
+                            && (!crossedVerticalSlop
+                                || Math.abs(dxFromDown) >= Math.abs(dyFromDown));
+                    if (horizontalFirst && !defaultSetting.getWrapContent()) {
+                        mHorizontalScrollGesture = true;
+                        mVerticalScrollGesture = true;
+                    } else if (crossedVerticalSlop) {
+                        mHorizontalScrollGesture = false;
+                        mVerticalScrollGesture = true;
+                    }
+                    if (mHorizontalScrollGesture || mVerticalScrollGesture) {
+                        cancelDeferredDownEvent();
+                        boolean hadDispatchedDown = mTouchDownDispatched;
+                        cancelDispatchedTextTouch(event);
+                        if (hadDispatchedDown) restoreTouchDownSelection();
+                    }
+                }
+                if (mHorizontalScrollGesture || mVerticalScrollGesture) {
+                    int maxScrollX = Math.max(0, getLayout() == null ? 0
+                            : getLayout().getWidth() - getWidth() + getPaddingLeft() + getPaddingRight());
+                    int maxScrollY = Math.max(0, getLayout() == null ? 0
+                            : getLayout().getHeight() - getHeight() + getPaddingTop() + getPaddingBottom());
+                    int targetX = mHorizontalScrollGesture
+                            ? Math.max(0, Math.min(maxScrollX,
+                                    getScrollX() - Math.round(event.getX() - mPreviousTouchX)))
+                            : getScrollX();
+                    int targetY = mVerticalScrollGesture
+                            ? Math.max(0, Math.min(maxScrollY,
+                                    getScrollY() - Math.round(event.getY() - mPreviousTouchY)))
+                            : getScrollY();
+                    scrollTo(targetX, targetY);
+                    mPreviousTouchX = event.getX();
+                    mPreviousTouchY = event.getY();
+                    break;
                 }
                 mPreviousTouchX = event.getX();
                 mPreviousTouchY = event.getY();
-                super.onTouchEvent(event);
+                if (mTouchDownDispatched) super.onTouchEvent(event);
                 break;
             case MotionEvent.ACTION_UP:
-                int velocityX;
-                mVelocityTracker.computeCurrentVelocity(1000, mMaximumVelocity);
-                int velocityY = (int) mVelocityTracker.getYVelocity();
-                if (defaultSetting.getWrapContent()) {
-                    velocityX = 0;
-                } else {
-                    velocityX = (int) mVelocityTracker.getXVelocity();
-                }
-                mPreviousTouchX = 0.0f;
-                mPreviousTouchY = 0.0f;
-                if (Math.abs(velocityY) >= 0 || Math.abs(velocityX) >= 0) {
-                    if (getLayout() == null) {
-                        return super.onTouchEvent(event);
+                mTouchHandler.removeCallbacks(mDispatchDeferredDown);
+                if (mVelocityTracker != null) {
+                    mVelocityTracker.addMovement(event);
+                    mVelocityTracker.computeCurrentVelocity(1000, mMaximumVelocity);
+                    int velocityX = defaultSetting.getWrapContent() ? 0 : (int) mVelocityTracker.getXVelocity();
+                    int velocityY = (int) mVelocityTracker.getYVelocity();
+                    if ((mHorizontalScrollGesture || mVerticalScrollGesture) && getLayout() != null) {
+                        int maxScrollX = Math.max(0, getLayout().getWidth() - getWidth()
+                                + getPaddingLeft() + getPaddingRight());
+                        int maxScrollY = Math.max(0, getLayout().getHeight() - getHeight()
+                                + getPaddingTop() + getPaddingBottom());
+                        int flingX = (!defaultSetting.getWrapContent() && mHorizontalScrollGesture
+                                && Math.abs(velocityX) > 250) ? -velocityX : 0;
+                        int flingY = (mVerticalScrollGesture && Math.abs(velocityY) > 250)
+                                ? -velocityY : 0;
+                        if (flingX != 0 || flingY != 0) {
+                            mScroller.fling(getScrollX(), getScrollY(), flingX, flingY,
+                                    0, maxScrollX, 0, maxScrollY);
+                            postInvalidateOnAnimation();
+                        }
+                    } else if (mTouchDownDispatched && getLayout() != null
+                            && (Math.abs(velocityX) > 0 || Math.abs(velocityY) > 0)) {
+                        int maxScrollX = Math.max(0, getLayout().getWidth() - getWidth()
+                                + getPaddingLeft() + getPaddingRight());
+                        int maxScrollY = Math.max(0, getLayout().getHeight() - getHeight()
+                                + getPaddingTop() + getPaddingBottom());
+                        mScroller.fling(getScrollX(), getScrollY(), -velocityX, -velocityY,
+                                0, maxScrollX, 0, maxScrollY);
+                        postInvalidateOnAnimation();
                     }
-                    mScroller.fling(
-                            getScrollX(), getScrollY(),
-                            -velocityX, -velocityY,
-                            0, ((getLayout().getWidth() - getWidth())
-                                    + getPaddingLeft()) + getPaddingRight(),
-                            0, ((getLayout().getHeight() - getHeight())
-                                    + getPaddingTop()) + getPaddingBottom());
-                } else if (mVelocityTracker != null) {
                     mVelocityTracker.recycle();
                     mVelocityTracker = null;
                 }
-                super.onTouchEvent(event);
+                if (!mHorizontalScrollGesture && !mVerticalScrollGesture) {
+                    if (!mTouchDownDispatched) dispatchDeferredDownEvent();
+                    super.onTouchEvent(event);
+                } else {
+                    cancelDeferredDownEvent();
+                    // Do not re-apply Selection after a viewport scroll. Calling
+                    // setSelection() here can make TextView auto-scroll to the caret,
+                    // especially when the gesture ends at the left boundary.
+                }
+                mPreviousTouchX = mPreviousTouchY = 0.0f;
+                mHorizontalScrollGesture = false;
+                mVerticalScrollGesture = false;
+                mTouchStartedOnCursorHandle = false;
+                mTouchDownDispatched = false;
+                mTouchDownSelectionStart = mTouchDownSelectionEnd = -1;
                 break;
-            case MotionEvent.ACTION_MOVE:
-                mVelocityTracker.addMovement(event);
-                mPreviousTouchX = event.getX();
-                mPreviousTouchY = event.getY();
-                super.onTouchEvent(event);
+            case MotionEvent.ACTION_CANCEL:
+                cancelDeferredDownEvent();
+                boolean hadDispatchedDown = mTouchDownDispatched;
+                mHorizontalScrollGesture = false;
+                mVerticalScrollGesture = false;
+                mTouchStartedOnCursorHandle = false;
+                mTouchDownDispatched = false;
+                mTouchDownSelectionStart = mTouchDownSelectionEnd = -1;
+                if (mVelocityTracker != null) {
+                    mVelocityTracker.recycle();
+                    mVelocityTracker = null;
+                }
+                if (hadDispatchedDown) super.onTouchEvent(event);
                 break;
             default:
-                super.onTouchEvent(event);
+                if (mTouchDownDispatched) super.onTouchEvent(event);
                 break;
         }
         return true;
+    }
+
+    private void cancelDispatchedTextTouch(MotionEvent sourceEvent) {
+        if (!mTouchDownDispatched) return;
+        MotionEvent cancel = MotionEvent.obtain(sourceEvent);
+        cancel.setAction(MotionEvent.ACTION_CANCEL);
+        try {
+            super.onTouchEvent(cancel);
+        } finally {
+            cancel.recycle();
+            mTouchDownDispatched = false;
+        }
+    }
+
+    private void restoreTouchDownSelection() {
+        if (mTouchDownSelectionStart < 0 || mTouchDownSelectionEnd < 0 || getText() == null) return;
+        int length = getText().length();
+        int start = Math.max(0, Math.min(mTouchDownSelectionStart, length));
+        int end = Math.max(0, Math.min(mTouchDownSelectionEnd, length));
+        try {
+            // Avoid firing selection-change machinery when the caret is already
+            // where it was at touch-down; it can request an unwanted scroll.
+            if (getSelectionStart() != start || getSelectionEnd() != end) {
+                Selection.setSelection(getText(), start, end);
+            }
+        } catch (RuntimeException ignored) {
+            // Ignore transient selection failures while the editor is relayouting.
+        }
+    }
+
+    private void dispatchDeferredDownEvent() {
+        if (mDeferredDownEvent != null && !mTouchDownDispatched) {
+            mTouchDownDispatched = true;
+            super.onTouchEvent(mDeferredDownEvent);
+        }
+        if (mDeferredDownEvent != null) {
+            mDeferredDownEvent.recycle();
+            mDeferredDownEvent = null;
+        }
+    }
+
+    private void cancelDeferredDownEvent() {
+        mTouchHandler.removeCallbacks(mDispatchDeferredDown);
+        if (mDeferredDownEvent != null) {
+            mDeferredDownEvent.recycle();
+            mDeferredDownEvent = null;
+        }
+    }
+
+    /**
+     * Let Android handle a drag that starts on the insertion handle (the waterdrop).
+     * Ordinary horizontal drags elsewhere are reserved for scrolling the code viewport.
+     */
+    private boolean isTouchNearCursorHandle(float x, float y) {
+        if (getLayout() == null || getSelectionStart() != getSelectionEnd()
+                || getSelectionEnd() < 0) return false;
+        try {
+            int offset = getSelectionEnd();
+            int line = getLayout().getLineForOffset(offset);
+            float caretX = getLayout().getPrimaryHorizontal(offset)
+                    + getCompoundPaddingLeft() - getScrollX();
+            float caretY = getLayout().getLineBottom(line)
+                    + getExtendedPaddingTop() - getScrollY();
+            float radius = getResources().getDisplayMetrics().density * 30f;
+            // The insertion handle is rendered around/below the caret baseline on Android.
+            return Math.abs(x - caretX) <= radius
+                    && y >= caretY - radius * 0.7f
+                    && y <= caretY + radius * 1.8f;
+        } catch (RuntimeException ignored) {
+            return false;
+        }
     }
 
     /**
@@ -897,6 +1159,7 @@ public class TextProcessor extends AppCompatMultiAutoCompleteTextView implements
     public void computeScroll() {
         if (!isInEditMode() && mScroller.computeScrollOffset()) {
             scrollTo(mScroller.getCurrX(), mScroller.getCurrY());
+            postInvalidateOnAnimation();
         }
     }
 
@@ -1074,6 +1337,13 @@ public class TextProcessor extends AppCompatMultiAutoCompleteTextView implements
                                         topLineOffset, bottomLineOffset),
                                 m.start() + topLineOffset, m.end() + topLineOffset,
                                 Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+                    }
+
+                    m = codeEditor.getLanguage().getSyntaxVariables().matcher( //Variables
+                            editable.subSequence(topLineOffset, bottomLineOffset));
+                    while (m.find()) {
+                        editable.setSpan(new SyntaxHighlightSpan(mSyntaxVariables, topLineOffset, bottomLineOffset),
+                                m.start() + topLineOffset, m.end() + topLineOffset, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
                     }
 
                     m = codeEditor.getLanguage().getSyntaxKeywords().matcher( //Keywords

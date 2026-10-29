@@ -6,7 +6,7 @@
     android:id="@+id/text_view"
     android:paddingRight="8dp"
     android:paddingLeft="8dp"
-    android:textColor="@color/textDarkPrimary"
+    android:textColor="@color/black"
     android:layout_width="wrap_content"
     android:minWidth="@dimen/bottom_bar_height"
     android:layout_height="@dimen/bottom_bar_height"

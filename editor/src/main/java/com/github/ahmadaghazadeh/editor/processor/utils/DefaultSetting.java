@@ -76,7 +76,7 @@ public class DefaultSetting implements ITextProcessorSetting {
 
     @Override
     public boolean getWrapContent() {
-        return pref.getBoolean("WRAP_CONTENT", true);
+        return false; // SR Builder: disable line wrapping; allow horizontal scrolling
     }
 
     @Override

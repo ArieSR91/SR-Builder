@@ -135,6 +135,8 @@ public class CodeEngine implements CodeEditor.ICodeEditorTextChange, OnTabClickL
         opcode_stack.invalidate();
         line_stack.invalidate();
         int opcode_num = 0;
+        boolean inVarDeclaration = false;
+        boolean inHexBlock = false;
         for (line_idx = 1; line_idx <= editor.getLineCount(); line_idx++) {
             CodeLine line_state = line_stack.getLine(line_idx - 1);
             assert line_state != null;
@@ -143,6 +145,77 @@ public class CodeEngine implements CodeEditor.ICodeEditorTextChange, OnTabClickL
                 continue;
             }
             String line = lines[line_idx - 1].trim();
+            // Source-level declarations and data blocks are handled by SannySourceParser,
+            // not by the opcode database validator.
+            if (inHexBlock) {
+                if (line.equalsIgnoreCase("end")) inHexBlock = false;
+                continue;
+            }
+            if (line.equalsIgnoreCase("hex")) { inHexBlock = true; continue; }
+            if (inVarDeclaration) {
+                if (line.equalsIgnoreCase("end")) inVarDeclaration = false;
+                continue;
+            }
+            if (line.equalsIgnoreCase("var")) { inVarDeclaration = true; continue; }
+            if (line.matches("(?i)^Alloc\\s*\\(.*\\)\\s*$")) continue;
+            // High-level Sanny Builder syntax is compiled by SannySourceParser; don't
+            // report its structural lines or plain expressions as unknown opcodes here.
+            if (line.matches("(?i)^(then|else|end)$") || line.matches("(?i)^(terminate_this_script|end_thread|terminate_this_custom_script)$") || line.matches("(?i)^while\\s+.*$") || line.matches("(?i)^(script_name|thread)\\s+[\"\\'].+[\"\\']$")) continue;
+            // Normalize simple Sanny expressions for live diagnostics, just as the
+            // compile-time parser does. Skipping them leaves the preceding `if`
+            // without a condition opcode and incorrectly paints it as an error.
+            // Normalize inverted shorthand conditions for live diagnostics. The compiler
+            // represents `not x == y` using the inverted opcode bit (0x8000), so the
+            // editor must do the same instead of treating the word `not` as an argument.
+            Matcher invertedCondition = Pattern.compile("(?i)^not\\s+((?:\\d+@|[$]\\w+))\\s*(==|!=|<>|>=|<=|>|<)\\s*(-?\\d+(?:\\.\\d+)?)$").matcher(line);
+            if (invertedCondition.matches()) {
+                String invertedOperator = invertedCondition.group(2).equals("!=") ? "<>" : invertedCondition.group(2);
+                line = "8039: " + invertedCondition.group(1) + " " + invertedOperator + " " + invertedCondition.group(3);
+            }
+            Matcher compoundExpression = Pattern.compile("(?i)^((?:\\d+@|[$]\\w+))\\s*(\\+=|-=|\\*=|/=)\\s*(-?\\d+(?:\\.\\d+)?)$").matcher(line);
+            if (compoundExpression.matches()) {
+                String op = compoundExpression.group(2);
+                boolean decimal = compoundExpression.group(3).contains(".");
+                String opcode;
+                if (op.equals("+=")) opcode = decimal ? "0009" : "000A";
+                else if (op.equals("-=")) opcode = decimal ? "000D" : "000C";
+                else if (op.equals("*=")) opcode = decimal ? "0011" : "0010";
+                else opcode = decimal ? "0015" : "0014";
+                line = opcode + ": " + compoundExpression.group(1) + " " + op + " " + compoundExpression.group(3);
+            }
+            Matcher reversedExpression = Pattern.compile("(?i)^(-?\\d+(?:\\.\\d+)?)\\s*(>=|<=|>|<)\\s*((?:\\d+@|[$]\\w+))$").matcher(line);
+            if (reversedExpression.matches()) {
+                String op = reversedExpression.group(2);
+                if (op.equals(">=")) op = "<="; else if (op.equals("<=")) op = ">="; else if (op.equals(">")) op = "<"; else op = ">";
+                line = "0039: " + reversedExpression.group(3) + " " + op + " " + reversedExpression.group(1);
+            }
+            if (line.matches("(?i)^(\\d+@|[$]\\w+)\\s*=\\s*(-?\\d+(?:\\.\\d+)?)$")) {
+                line = line.replaceFirst("(?i)^(\\d+@|[$]\\w+)\\s*=\\s*(-?\\d+(?:\\.\\d+)?)$", "0006: $1 = $2");
+            } else if (line.matches("(?i)^(\\d+@|[$]\\w+)\\s*(==|!=|<>|>=|<=|>|<)\\s*(-?\\d+(?:\\.\\d+)?)$")) {
+                Matcher expression = Pattern.compile("(?i)^(\\d+@|[$]\\w+)\\s*(==|!=|<>|>=|<=|>|<)\\s*(-?\\d+(?:\\.\\d+)?)$").matcher(line);
+                if (expression.matches()) {
+                    String operator = expression.group(2).equals("!=") ? "<>" : expression.group(2);
+                    line = "0039: " + expression.group(1) + " " + operator + " " + expression.group(3);
+                }
+            }
+            // Normalize supported Sanny Builder shorthand for live editor diagnostics too,
+            // so the editor does not mark valid source as unknown opcodes.
+            if (line.matches("(?i)^if(?:\\s+(?:and|or))?$")) line = "00D6: " + line.toLowerCase(java.util.Locale.ROOT);
+            else if (line.matches("(?i)^(jf|jump_if_false|goto_if_false)\\s+.*$")) line = line.replaceFirst("(?i)^(jf|jump_if_false|goto_if_false)\\s+", "004D: jump_if_false ");
+            else if (line.matches("(?i)^(goto|jump)\\s+@?[A-Za-z0-9_]+$")) {
+                String target = line.replaceFirst("(?i)^(goto|jump)\\s+", "");
+                if (!target.startsWith("@")) target = "@" + target;
+                line = "0002: jump " + target;
+            }
+            else if (line.matches("(?i)^gosub\\s+@?[A-Za-z0-9_]+$")) {
+                String target = line.replaceFirst("(?i)^gosub\\s+", "");
+                if (!target.startsWith("@")) target = "@" + target;
+                line = "0050: gosub " + target;
+            }
+            else if (line.equalsIgnoreCase("return")) line = "0051: return";
+            else if (line.equalsIgnoreCase("terminate_this_script") || line.equalsIgnoreCase("end_thread")) line = "004E: terminate_this_script";
+            else if (line.equalsIgnoreCase("terminate_this_custom_script")) line = "004E: terminate_this_script";
+            else if (line.matches("(?i)^wait\\s+-?\\d+$")) line = line.replaceFirst("(?i)^wait\\s+", "0001: wait ");
             if(line.length() > 0) {
                 Log.e("TEST","'" + line + "' -> " +line.matches("^[0-9A-Fa-f]{4}:.*$"));
                 if (line.matches("\\{\\$CLEO\\s\\.cs[ais]?\\}")) {

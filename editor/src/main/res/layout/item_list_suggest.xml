@@ -29,7 +29,7 @@
     <TextView
         android:paddingStart="4dp"
         android:paddingLeft="4dp"
-        android:textColor="@color/textDarkPrimary"
+        android:textColor="@color/black"
         android:id="@+id/suggestion_title"
         android:text="test"
         android:layout_toEndOf="@id/code_container"
@@ -42,7 +42,7 @@
         android:singleLine="true"
         android:textAppearance="@style/Base.TextAppearance.AppCompat.Small" />
     <TextView
-        android:textColor="@color/gray"
+        android:textColor="@color/black"
         android:id="@+id/suggestion_class"
         android:layout_toEndOf="@id/suggestion_title"
         android:layout_toRightOf="@id/suggestion_title"

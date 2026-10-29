@@ -32,6 +32,7 @@ import com.fastsmartsystem.cleo.IDECollector;
 import com.fastsmartsystem.cleo.OpcodesLoader;
 import com.fastsmartsystem.cleo.ScriptCompiler;
 import com.fastsmartsystem.cleo.ScriptDecompiler;
+import com.fastsmartsystem.cleo.SannySourceParser;
 import com.fastsmartsystem.cleoeditor.code.CodeEngine;
 import com.fastsmartsystem.cleoeditor.intent.RequestOpenFile;
 import com.fastsmartsystem.cleoeditor.intent.RequestSaveFile;
@@ -70,6 +71,8 @@ public class MainActivity extends AppCompatActivity {
     private ActivityResultLauncher<String> SaveLauncher;
     private Button btnopenFile;
     Toolbar toolbar;
+    private boolean waitingForAllFilesAccess = false;
+    private static final String CUSTOM_SA_MOBILE_DIR = "/sdcard/sr-builder/sa_mobile/";
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -95,6 +98,7 @@ public class MainActivity extends AppCompatActivity {
         initFiles();
         initEngine();
         initIntent();
+        requestCustomFolderAccessIfNeeded();
     }
 
     @Override
@@ -136,19 +140,94 @@ public class MainActivity extends AppCompatActivity {
         App.dataDirectory = getExternalFilesDir(null).getAbsolutePath() + "/";
         extractAssets();
         ide_collector = new IDECollector();
+        File customDir = new File(CUSTOM_SA_MOBILE_DIR);
+        ensureCustomFolderExists();
+        File customPeds = new File(customDir, "peds.ide");
+        File customVehicles = new File(customDir, "vehicles.ide");
+        // Load user overrides first so custom model names/IDs take precedence over bundled IDE data.
+        if (customPeds.isFile() && customPeds.canRead()) ide_collector.collect(customPeds.getAbsolutePath());
+        if (customVehicles.isFile() && customVehicles.canRead()) ide_collector.collect(customVehicles.getAbsolutePath());
         ide_collector.collect(App.dataDirectory + "default.ide");
         ide_collector.collect(App.dataDirectory + "globals.ide");
-        ide_collector.collect(App.dataDirectory + "peds.ide");
-        ide_collector.collect(App.dataDirectory + "vehicles.ide");
+        if (!customPeds.isFile() || !customPeds.canRead()) ide_collector.collect(App.dataDirectory + "peds.ide");
+        if (!customVehicles.isFile() || !customVehicles.canRead()) ide_collector.collect(App.dataDirectory + "vehicles.ide");
         loadGameTarget();
         loadOpcodes();
+    }
+
+    private boolean hasCustomFolderAccess() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) return android.os.Environment.isExternalStorageManager();
+        return Build.VERSION.SDK_INT < Build.VERSION_CODES.M ||
+                (checkSelfPermission(Manifest.permission.READ_EXTERNAL_STORAGE) == PackageManager.PERMISSION_GRANTED &&
+                 checkSelfPermission(Manifest.permission.WRITE_EXTERNAL_STORAGE) == PackageManager.PERMISSION_GRANTED);
+    }
+
+    private void ensureCustomFolderExists() {
+        if (!hasCustomFolderAccess()) return;
+        File folder = new File(CUSTOM_SA_MOBILE_DIR);
+        if (!folder.exists()) {
+            boolean created = folder.mkdirs();
+            if (created) android.util.Log.i("SRBuilder", "Created custom data folder: " + folder.getAbsolutePath());
+        }
+    }
+
+    private void requestCustomFolderAccessIfNeeded() {
+        if (hasCustomFolderAccess()) return;
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && Build.VERSION.SDK_INT < Build.VERSION_CODES.R) {
+            requestPermissions(new String[]{Manifest.permission.READ_EXTERNAL_STORAGE, Manifest.permission.WRITE_EXTERNAL_STORAGE}, 101);
+            return;
+        }
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return;
+        new AlertDialog.Builder(this)
+                .setTitle("Akses folder sa_mobile")
+                .setMessage("Agar SR Builder dapat membuat folder " + CUSTOM_SA_MOBILE_DIR + " dan membaca peds.ide, vehicles.ide, opcodes.txt, SASCM.ini, SASCM.Mobile.ini, serta SASCM.CLEO.ini, izinkan akses semua file pada halaman pengaturan berikut.")
+                .setPositiveButton("Buka pengaturan", (dialog, which) -> {
+                    try {
+                        waitingForAllFilesAccess = true;
+                        Intent intent = new Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION,
+                                Uri.parse("package:" + getPackageName()));
+                        startActivity(intent);
+                    } catch (Exception e) {
+                        waitingForAllFilesAccess = false;
+                        Toast.makeText(this, "Pengaturan akses file tidak tersedia di perangkat ini.", Toast.LENGTH_LONG).show();
+                    }
+                })
+                .setNegativeButton("Nanti", null)
+                .show();
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        if (waitingForAllFilesAccess) {
+            waitingForAllFilesAccess = false;
+            if (hasCustomFolderAccess()) {
+                ensureCustomFolderExists();
+                initFiles();
+                initEngine();
+                Toast.makeText(this, "Data sa_mobile eksternal dimuat ulang.", Toast.LENGTH_SHORT).show();
+            }
+        }
     }
 
     private void loadOpcodes() {
         String datFile = gameTarget == GAME_PC ? "sa.dat" : "sa_mobile.dat";
         scm_loader = new OpcodesLoader(App.dataDirectory + datFile);
-        if(gameTarget == GAME_PC) {
-            // the PC opcode list has no CLEO opcodes: add them from the .ini that comes with the app
+        File customDir = new File(CUSTOM_SA_MOBILE_DIR);
+        // Load the user's Sanny Builder opcode definitions from the requested folder.
+        // All three files are considered; duplicate opcode IDs already present in the
+        // binary database or an earlier INI are safely ignored by OpcodesLoader.
+        String[] iniNames = {"SASCM.ini", "SASCM.Mobile.ini", "SASCM.CLEO.ini"};
+        boolean loadedCustomCleo = false;
+        for (String iniName : iniNames) {
+            File ini = new File(customDir, iniName);
+            if (hasCustomFolderAccess() && ini.isFile() && ini.canRead()) {
+                scm_loader.loadIni(ini.getAbsolutePath());
+                if ("SASCM.CLEO.ini".equalsIgnoreCase(iniName)) loadedCustomCleo = true;
+            }
+        }
+        // Keep the bundled CLEO definitions as a fallback when using the PC opcode database.
+        if (gameTarget == GAME_PC && !loadedCustomCleo) {
             scm_loader.loadIni(App.dataDirectory + "SASCM.CLEO.ini");
         }
     }
@@ -173,6 +252,15 @@ public class MainActivity extends AppCompatActivity {
                 Uri uri = Uri.fromParts("package",getPackageName(),null);
                 intent.setData(uri);
                 startActivity(intent);
+            }
+        } else if (requestCode == 101) {
+            if (hasCustomFolderAccess()) {
+                ensureCustomFolderExists();
+                initFiles();
+                initEngine();
+                Toast.makeText(this, "Folder sa_mobile siap digunakan.", Toast.LENGTH_SHORT).show();
+            } else {
+                Toast.makeText(this, "Izin baca/tulis diperlukan untuk membuat folder sa_mobile dan membaca file konfigurasi.", Toast.LENGTH_LONG).show();
             }
         }
     }
@@ -217,8 +305,17 @@ public class MainActivity extends AppCompatActivity {
                     OutputStream out = getContentResolver().openOutputStream(data);
                     if(type_function == COMPILE) {
                        new Thread(() -> {
-                           String result = compiler.compile(engine.getEditor().getText(), out);
-                           runOnUiThread(() -> showDialogResult(result));
+                           String source = engine.getEditor().getText();
+                           String result;
+                           try {
+                               source = SannySourceParser.parse(source);
+                               result = compiler.compile(source, out);
+                           } catch (IllegalArgumentException parseError) {
+                               try { out.close(); } catch (Exception ignored) {}
+                               result = parseError.getMessage();
+                           }
+                           final String dialogResult = result;
+                           runOnUiThread(() -> showDialogResult(dialogResult));
                        }).start();
                     } else if(type_function == SAVE_FILE) {
                         saved_file = true;

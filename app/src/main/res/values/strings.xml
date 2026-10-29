@@ -1,5 +1,5 @@
 <resources>
-    <string name="app_name">CLEO Editor</string>
+    <string name="app_name">SR Builder</string>
     <string name="undo">Undo</string>
     <string name="redo">Redo</string>
     <string name="code_errors">Code and Errors</string>

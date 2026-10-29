@@ -3,6 +3,10 @@ package com.fastsmartsystem.cleoeditor.views;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
+import android.content.ClipData;
+import android.content.ClipboardManager;
+import android.content.Context;
+import android.widget.Toast;
 import android.widget.TextView;
 
 import androidx.annotation.NonNull;
@@ -29,9 +33,19 @@ public class OpcodeAdapter extends RecyclerView.Adapter<OpcodeAdapter.OpcodeView
         if (query.trim().isEmpty()) {
             filteredDataList.addAll(dataList);
         } else {
-            String filterPattern = query.toLowerCase().trim();
+            // Support multi-word searches: every entered word must occur somewhere
+            // in the opcode text, regardless of case or word order.
+            String[] searchTerms = query.toLowerCase(java.util.Locale.ROOT).trim().split("\\s+");
             for (OpcodeItem item : dataList) {
-                if (item.name.toLowerCase().contains(filterPattern)) {
+                String opcodeText = item.name.toLowerCase(java.util.Locale.ROOT);
+                boolean matchesAllTerms = true;
+                for (String term : searchTerms) {
+                    if (!term.isEmpty() && !opcodeText.contains(term)) {
+                        matchesAllTerms = false;
+                        break;
+                    }
+                }
+                if (matchesAllTerms) {
                     filteredDataList.add(item);
                 }
             }
@@ -64,6 +78,20 @@ public class OpcodeAdapter extends RecyclerView.Adapter<OpcodeAdapter.OpcodeView
                 if(pos != RecyclerView.NO_POSITION && clickListener != null) {
                     clickListener.OnClick(filteredDataList.get(pos));
                 }
+            });
+            // Long-pressing an opcode copies its exact plain-text line to the clipboard.
+            textView.setOnLongClickListener(v -> {
+                int pos = getAdapterPosition();
+                if (pos == RecyclerView.NO_POSITION) return false;
+                OpcodeItem item = filteredDataList.get(pos);
+                ClipboardManager clipboard = (ClipboardManager) itemView.getContext()
+                        .getSystemService(Context.CLIPBOARD_SERVICE);
+                if (clipboard != null) {
+                    clipboard.setPrimaryClip(ClipData.newPlainText("Opcode", item.name));
+                    Toast.makeText(itemView.getContext(), "Opcode disalin", Toast.LENGTH_SHORT).show();
+                    return true;
+                }
+                return false;
             });
         }
     }

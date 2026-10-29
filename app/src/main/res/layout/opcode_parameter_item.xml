@@ -29,7 +29,7 @@
         android:orientation="vertical">
         <TextView
             android:textSize="14sp"
-            android:textColor="@color/textDarkPrimary"
+            android:textColor="#000000"
             android:id="@+id/parameter_name"
             android:text="test"
             android:textStyle="bold"
@@ -44,9 +44,9 @@
 
             <TextView
                 android:textSize="14sp"
-                android:textColor="@color/textDarkPrimary"
+                android:textColor="#000000"
                 android:id="@+id/param_exp"
-                android:layout_width="match_parent"
+                android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
                 android:gravity="start|center_vertical"
@@ -54,10 +54,10 @@
 
             <TextView
                 android:textSize="14sp"
-                android:textColor="@color/textDarkPrimary"
+                android:textColor="#000000"
                 android:id="@+id/param_found"
                 android:layout_weight="1"
-                android:layout_width="match_parent"
+                android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:gravity="start|center_vertical"
                 android:textAppearance="@style/Base.TextAppearance.AppCompat.Small" />

@@ -197,7 +197,8 @@ public class CodeEditor extends FrameLayout {
             editor.enableUndoRedoStack();
 
             recyclerView = new ExtendedKeyboard(context);
-
+            // Use the original toolbar elevation, translationZ, background,
+            // overscroll, outline and state-list animation behavior.
 
             rootView.getViewTreeObserver().addOnGlobalLayoutListener(new ViewTreeObserver.OnGlobalLayoutListener() {
                 @Override
@@ -222,10 +223,16 @@ public class CodeEditor extends FrameLayout {
                                 String text = editor.getText().toString();
                                 int s = text.indexOf("%", start);
                                 if (s == -1) {
-                                    editor.setSelection(text.length());
+                                    editor.setSelection(Math.min(text.length(), start + result.length()));
                                 } else {
                                     editor.setSelection(s, text.indexOf("%", s + 1) + 1);
                                 }
+                            } else {
+                                // Toolbar Tab should behave like the keyboard Tab key when
+                                // no opcode template is available (including multi-line selection).
+                                editor.onKeyDown(android.view.KeyEvent.KEYCODE_TAB,
+                                        new android.view.KeyEvent(android.view.KeyEvent.ACTION_DOWN,
+                                                android.view.KeyEvent.KEYCODE_TAB));
                             }
                         } else if (symbol.getShowText().endsWith("End")) {
                             String text = editor.getText().toString();

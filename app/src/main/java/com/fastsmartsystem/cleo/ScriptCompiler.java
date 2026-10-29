@@ -102,10 +102,23 @@ public class ScriptCompiler
 		ifConditions = 0;
 		ifLogic = 0;
 		line_idx = 0;
-		for(String raw : source.split("\r?\n", -1)) {
+		String[] sourceLines = source.split("\r?\n", -1);
+		for(int sourceIndex = 0; sourceIndex < sourceLines.length; sourceIndex++) {
+			String raw = sourceLines[sourceIndex];
 			line_idx++;
 			String line = stripComment(raw).trim();
 			if(line.isEmpty()) {
+				continue;
+			}
+			if(line.equalsIgnoreCase("hex")) {
+				boolean closed = false;
+				while (++sourceIndex < sourceLines.length) {
+					line_idx++;
+					String hexLine = sourceLines[sourceIndex].trim();
+					if(hexLine.equalsIgnoreCase("end")) { closed = true; break; }
+					writeHexData(hexLine, buffer);
+				}
+				if(!closed) throw fail("hex block is missing 'end'");
 				continue;
 			}
 			if(line.startsWith("{$VAR ")) {
@@ -156,6 +169,24 @@ public class ScriptCompiler
 		return code;
 	}
 
+	/** Writes Sanny-style hex block contents as literal bytes; quoted strings are UTF-8 followed by no implicit terminator. */
+	private void writeHexData(String line, ByteArrayOutputStream buffer) {
+		Matcher token = Pattern.compile("\"([^\"]*)\"|([0-9A-Fa-f]{2})").matcher(line);
+		int consumed = 0;
+		while(token.find()) {
+			String gap = line.substring(consumed, token.start()).trim();
+			if(!gap.isEmpty()) throw fail("invalid token in hex block: " + gap);
+			if(token.group(1) != null) {
+				byte[] bytes = token.group(1).getBytes(StandardCharsets.UTF_8);
+				buffer.write(bytes, 0, bytes.length);
+			} else {
+				buffer.write(Integer.parseInt(token.group(2), 16));
+			}
+			consumed = token.end();
+		}
+		if(!line.substring(consumed).trim().isEmpty()) throw fail("invalid token in hex block: " + line.substring(consumed).trim());
+	}
+
 	private ScriptFormatException fail(String message) {
 		return new ScriptFormatException("Line " + line_idx + ": " + message, line_idx);
 	}
@@ -168,7 +199,14 @@ public class ScriptCompiler
 			if(ifConditions == 0) {
 				throw fail("if statement requires at least one condition");
 			} else if(ifConditions > 1) {
-				throw fail("too much conditions");
+				// Some source-normalization paths may lose the textual "and" in
+				// `if and`. Multiple consecutive condition opcodes mean an AND group
+				// in Sanny Builder syntax, so encode the inferred AND count rather
+				// than rejecting a valid condition block as "too much conditions".
+				if(ifConditions > 8) {
+					throw fail("only a maximum of 8 conditions is supported, found " + ifConditions);
+				}
+				patches.add(new int[] { pos, ifConditions - 1 });
 			}
 		} else if(ifConditions < 2) {
 			throw fail("if statement requires at least two conditions");

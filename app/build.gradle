@@ -2,24 +2,31 @@ plugins {
     id 'com.android.application'
 }
 
+def keystoreConfigFile = file('keystore.config')
+def hasReleaseKeystore = keystoreConfigFile.exists()
+
 android {
-    signingConfigs {
-        release {
-            Properties keystoreProps = new Properties()
-            keystoreProps.load(new FileInputStream(file('keystore.config')))
-
-            keyAlias = keystoreProps['keyAlias']
-            keyPassword = keystoreProps['keyPassword']
-            storePassword = keystoreProps['storePassword']
-            storeFile = file(keystoreProps['keyPath'])
-        }
-    }
-
     namespace = 'com.fastsmartsystem.cleoeditor'
     compileSdk = 35
 
+    // A local signing key is optional for debug builds. Keep release signing
+    // configured only when the developer has supplied app/keystore.config.
+    signingConfigs {
+        if (hasReleaseKeystore) {
+            release {
+                Properties keystoreProps = new Properties()
+                keystoreConfigFile.withInputStream { stream -> keystoreProps.load(stream) }
+
+                keyAlias = keystoreProps['keyAlias']
+                keyPassword = keystoreProps['keyPassword']
+                storePassword = keystoreProps['storePassword']
+                storeFile = file(keystoreProps['keyPath'])
+            }
+        }
+    }
+
     defaultConfig {
-        applicationId = "com.fastsmartsystem.cleoeditor"
+        applicationId = "com.ariesr91.builder"
         minSdk = 21
         targetSdk = 35
         versionCode = 2
@@ -31,7 +38,9 @@ android {
             minifyEnabled = false
             shrinkResources = false
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
-            signingConfig = signingConfigs.release
+            if (hasReleaseKeystore) {
+                signingConfig = signingConfigs.release
+            }
         }
     }
 

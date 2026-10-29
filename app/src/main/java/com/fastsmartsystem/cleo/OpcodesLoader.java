@@ -51,10 +51,16 @@ public class OpcodesLoader
 		// start_new_script and run_external_script take a list of arguments that ends with a 0x00 byte
 		markVariadic(0x004F);
 		markVariadic(0x0913);
+        // The bundled opcode database may not flag these CLEO opcodes as conditions.
+        // Mark known condition opcodes so `if` accepts them in the live editor.
+        for(int id : CLEO_CONDITIONS) {
+            OpcodeInfo info = ops.get(id);
+            if(info != null) info.attributes |= OpcodeInfo.is_condition;
+        }
 	}
 
 	/** CLEO opcodes that are conditions (usable after 'if'); the .ini format does not say which ones they are. */
-	private static final int[] CLEO_CONDITIONS = { 0x0A9A, 0x0AA2, 0x0AA4, 0x0AA9, 0x0AAB, 0x0AB0, 0x0AB6, 0x0ABD, 0x0ABE,
+	private static final int[] CLEO_CONDITIONS = { 0x0A55, 0x0A56, 0x0A9A, 0x0AA2, 0x0AA4, 0x0AA9, 0x0AAB, 0x0AB0, 0x0AB6, 0x0ABD, 0x0ABE,
 		0x0AC8, 0x0AD2, 0x0AD4, 0x0AD5, 0x0AD6, 0x0AD7, 0x0AD8, 0x0ADA, 0x0ADC, 0x0AE1, 0x0AE2, 0x0AE3, 0x0AE4, 0x0AE5,
 		0x0AE6, 0x0AE7 };
 
@@ -102,6 +108,9 @@ public class OpcodesLoader
 					continue;
 				}
 				if(ops.containsKey(id)) {
+                    // A custom INI may describe an opcode already present in the bundled
+                    // database. Preserve its metadata, but apply known CLEO condition flags.
+                    if(isCleoCondition(id)) ops.get(id).attributes |= OpcodeInfo.is_condition;
 					continue;
 				}
 				OpcodeInfo info = new OpcodeInfo();
