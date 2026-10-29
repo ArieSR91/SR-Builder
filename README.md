@@ -18,7 +18,7 @@ An unofficial Sanny Builder port for Android, written in Java. It allows you to 
 ## Dependencies
 
 - [CodeEditor](https://github.com/ahmadaghazadeh/CodeEditor) — Lightweight code editor for Android
-- [CleoEditor](https://github.com/FSSRepo/cleo-editor-android) - Cleo Editor for Android
+- [cleo-editor-android](https://github.com/FSSRepo/cleo-editor-android) - Cleo Editor for Android
 
 ## Usage
 
@@ -41,7 +41,7 @@ lives in [cleo-script-java](https://github.com/FSSRepo/cleo-script-java), whose 
 
 This is an unofficial tool and is not affiliated with Sanny Builder or Rockstar Games.
 
-I am not the developer of this apps, I only modified and rebuilt it from existing source code by FSSRepo.
+I am not the developer of this apps, I only modified and rebuilt it from existing source code by [FSSRepo](https://github.com/FSSRepo/cleo-editor-android).
 
 ## License
 
