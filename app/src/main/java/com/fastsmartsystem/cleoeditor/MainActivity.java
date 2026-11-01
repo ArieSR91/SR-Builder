@@ -25,6 +25,9 @@ import android.view.Menu;
 import android.view.MenuItem;
 import android.view.View;
 import android.widget.Button;
+import android.widget.HorizontalScrollView;
+import android.widget.LinearLayout;
+import android.widget.TextView;
 import android.widget.EditText;
 import android.widget.Toast;
 
@@ -38,12 +41,15 @@ import com.fastsmartsystem.cleoeditor.intent.RequestOpenFile;
 import com.fastsmartsystem.cleoeditor.intent.RequestSaveFile;
 import com.fastsmartsystem.cleoeditor.views.CodeInspectorDialog;
 import com.github.ahmadaghazadeh.editor.processor.TextNotFoundException;
+import com.github.ahmadaghazadeh.editor.processor.TextProcessor;
 import com.google.android.material.navigation.NavigationView;
 
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.io.IOException;
+import java.util.ArrayList;
 
 public class MainActivity extends AppCompatActivity {
     CodeEngine engine;
@@ -74,12 +80,36 @@ public class MainActivity extends AppCompatActivity {
     private boolean waitingForAllFilesAccess = false;
     private static final String CUSTOM_SA_MOBILE_DIR = "/sdcard/sr-builder/sa_mobile/";
 
+    private static class EditorDocument {
+        String name;
+        String text;
+        boolean dirty;
+        Uri uri;
+        final ArrayList<String> undoHistory = new ArrayList<>();
+        final ArrayList<String> redoHistory = new ArrayList<>();
+        int cursorStart;
+        int cursorEnd;
+        int scrollX;
+        int scrollY;
+        EditorDocument(String name, String text, boolean dirty, Uri uri) {
+            this.name = name;
+            this.text = text == null ? "" : text;
+            this.dirty = dirty;
+            this.uri = uri;
+        }
+    }
+    private final ArrayList<EditorDocument> openDocuments = new ArrayList<>();
+    private EditorDocument activeDocument;
+    private LinearLayout documentTabs;
+    private boolean restoringDocument = false;
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
         drawerLayout = findViewById(R.id.drawer);
         toolbar = findViewById(R.id.toolbar);
+        documentTabs = findViewById(R.id.document_tabs);
         setSupportActionBar(toolbar);
         drawerLayout.addDrawerListener(
                 new ActionBarDrawerToggle(
@@ -105,11 +135,7 @@ public class MainActivity extends AppCompatActivity {
     public boolean onCreateOptionsMenu(Menu menu) {
         getMenuInflater().inflate(R.menu.editor_menu, menu);
         this.menu = menu;
-        if (file_name != null) {
-            menu.findItem(R.id.undo).setVisible(true);
-            menu.findItem(R.id.redo).setVisible(true);
-            menu.findItem(R.id.code_errors).setVisible(true);
-        }
+        updateDocumentMenuVisibility();
         updateMenuIcon();
         return super.onCreateOptionsMenu(menu);
     }
@@ -118,18 +144,12 @@ public class MainActivity extends AppCompatActivity {
     public boolean onOptionsItemSelected(@NonNull MenuItem item) {
         final int menuItemId = item.getItemId();
         if (menuItemId == R.id.undo) {
-            try {
-                engine.getEditor().undo();
-            } catch (TextNotFoundException e) {
-                throw new RuntimeException(e);
-            }
+            undoActiveDocument();
         }
         else if (menuItemId == R.id.redo) {
-            try {
-                engine.getEditor().redo();
-            } catch (TextNotFoundException e) {
-                throw new RuntimeException(e);
-            }
+            redoActiveDocument();
+        } else if (menuItemId == R.id.save_current) {
+            saveCurrentDocument();
         } else if(menuItemId == R.id.code_errors) {
             new CodeInspectorDialog(engine).show(getSupportFragmentManager(), "CodeInspector");
         }
@@ -269,11 +289,30 @@ public class MainActivity extends AppCompatActivity {
         engine = new CodeEngine(this, findViewById(R.id.editor), ide_collector, scm_loader);
         compiler = new ScriptCompiler(scm_loader, ide_collector);
         decompiler = new ScriptDecompiler(scm_loader, ide_collector);
+        engine.getEditor().addOnTextChange(text -> {
+            if (!restoringDocument && activeDocument != null) {
+                String previousText = activeDocument.text == null ? "" : activeDocument.text;
+                if (!previousText.equals(text)) {
+                    activeDocument.undoHistory.add(previousText);
+                    if (activeDocument.undoHistory.size() > 500) {
+                        activeDocument.undoHistory.remove(0);
+                    }
+                    activeDocument.redoHistory.clear();
+                }
+                activeDocument.text = text;
+                activeDocument.dirty = true;
+                saved_file = false;
+                refreshDocumentTabs();
+            }
+        });
     }
 
     private void initIntent() {
         OpenLauncher = registerForActivityResult(new RequestOpenFile(), (data) -> {
             if(data != null) {
+                try { getContentResolver().takePersistableUriPermission(data,
+                        Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_WRITE_URI_PERMISSION); }
+                catch (Exception ignored) { }
                 file_name = getFileName(data);
                 try{
                     InputStream is = getContentResolver().openInputStream(data);
@@ -283,14 +322,12 @@ public class MainActivity extends AppCompatActivity {
                             new File(App.dataDirectory + file_name).delete();
                             file_name = file_name.replaceAll(".csa|.csi|.cs", ".txt");
                             engine.enqueue(() -> runOnUiThread(() -> {
-                                loadTextFile(decompiled);
-                                saved_file = false;
+                                openDocument(file_name, decompiled, false, null);
                             }));
                         }).start();
                     } else if(type_function == OPEN_FILE && file_name.endsWith(".txt")) {
                         engine.enqueue(() -> runOnUiThread(() -> {
-                            loadTextFile(readFileText(is));
-                            saved_file = true;
+                            openDocument(file_name, readFileText(is), true, data);
                         }));
                     } else {
                         is.close();
@@ -302,6 +339,9 @@ public class MainActivity extends AppCompatActivity {
         SaveLauncher = registerForActivityResult(new RequestSaveFile(), (data) -> {
             if(data != null) {
                 try {
+                    try { getContentResolver().takePersistableUriPermission(data,
+                            Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_WRITE_URI_PERMISSION); }
+                    catch (Exception ignored) { }
                     OutputStream out = getContentResolver().openOutputStream(data);
                     if(type_function == COMPILE) {
                        new Thread(() -> {
@@ -318,8 +358,14 @@ public class MainActivity extends AppCompatActivity {
                            runOnUiThread(() -> showDialogResult(dialogResult));
                        }).start();
                     } else if(type_function == SAVE_FILE) {
+                        if (activeDocument != null) activeDocument.uri = data;
                         saved_file = true;
                         saveFileText(out);
+                        if (activeDocument != null) {
+                            activeDocument.text = engine.getEditor().getText();
+                            activeDocument.dirty = false;
+                            refreshDocumentTabs();
+                        }
                         if(save_temp_func != -1) {
                             performFunction(save_temp_func);
                             save_temp_func = -1;
@@ -364,10 +410,8 @@ public class MainActivity extends AppCompatActivity {
                 Toast.makeText(getApplicationContext(), getString(R.string.open_a_file), Toast.LENGTH_SHORT).show();
                 return;
             }
-            if(file_name != null && !saved_file && (function == NEW_FILE || function == DECOMPILE || function == OPEN_FILE)) {
-                showSaveConfirmationDialog(function);
-                return;
-            }
+            // Opening or creating another document no longer replaces the active
+            // buffer; each tab retains its own unsaved text.
             if(function == OPEN_FILE || function == DECOMPILE) {
                 OpenLauncher.launch(null);
             } else if(function == SAVE_FILE) {
@@ -387,14 +431,180 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void loadTextFile(String text) {
-        engine.getEditor().setText(text, 1);
-        menu.findItem(R.id.undo).setVisible(true);
-        menu.findItem(R.id.redo).setVisible(true);
-        menu.findItem(R.id.code_errors).setVisible(true);
+        openDocument(file_name == null ? "Untitled.txt" : file_name, text, false);
+    }
+
+    private void openDocument(String name, String text, boolean clean) {
+        openDocument(name, text, clean, null);
+    }
+
+    private void openDocument(String name, String text, boolean clean, Uri uri) {
+        if (activeDocument != null) captureActiveDocument();
+        EditorDocument existing = null;
+        for (EditorDocument document : openDocuments) {
+            if (document.name.equals(name)) { existing = document; break; }
+        }
+        if (existing == null) {
+            existing = new EditorDocument(name, text, !clean, uri);
+            openDocuments.add(existing);
+        } else if (text != null && !existing.dirty) {
+            existing.text = text;
+            if (uri != null) existing.uri = uri;
+        }
+        activateDocument(existing);
+    }
+
+    private void captureActiveDocument() {
+        if (activeDocument == null || engine == null) return;
+        activeDocument.text = engine.getEditor().getText();
+        activeDocument.cursorStart = Math.max(0, engine.getEditor().getTextProcessor().getSelectionStart());
+        activeDocument.cursorEnd = Math.max(0, engine.getEditor().getTextProcessor().getSelectionEnd());
+        activeDocument.scrollX = engine.getEditor().getTextProcessor().getScrollX();
+        activeDocument.scrollY = engine.getEditor().getTextProcessor().getScrollY();
+    }
+
+    private void activateDocument(EditorDocument document) {
+        activeDocument = document;
+        file_name = document.name;
+        saved_file = !document.dirty;
+        restoringDocument = true;
+        engine.getEditor().setText(document.text, 1);
+        // Restore selection and viewport only after the new document has been
+        // measured. Restoring scroll before layout clamps it to the old/empty
+        // content range and can send long documents back to line 1.
+        final TextProcessor processor = engine.getEditor().getTextProcessor();
+        final android.view.ViewTreeObserver observer = processor.getViewTreeObserver();
+        observer.addOnPreDrawListener(new android.view.ViewTreeObserver.OnPreDrawListener() {
+            @Override public boolean onPreDraw() {
+                if (processor.getViewTreeObserver().isAlive()) {
+                    processor.getViewTreeObserver().removeOnPreDrawListener(this);
+                }
+                int length = engine.getEditor().getText().length();
+                int start = Math.min(document.cursorStart, length);
+                int end = Math.min(document.cursorEnd, length);
+                int maxX = Math.max(0, processor.getLayout() == null ? 0
+                        : processor.getLayout().getWidth() - processor.getWidth());
+                int maxY = Math.max(0, processor.getLayout() == null ? 0
+                        : processor.getLayout().getHeight() - processor.getHeight());
+                // Restore the viewport first. TextView's insertion/selection controller
+                // derives handle coordinates from the current scroll offsets; setting
+                // selection before scroll restoration can leave its waterdrop stale.
+                processor.scrollTo(Math.min(document.scrollX, maxX),
+                        Math.min(document.scrollY, maxY));
+                processor.setSelection(start, end);
+                processor.postInvalidateOnAnimation();
+                restoringDocument = false;
+                return true;
+            }
+        });
+        processor.requestLayout();
+        updateDocumentMenuVisibility();
         engine.getEditor().setVisibility(View.VISIBLE);
         btnopenFile.setVisibility(View.GONE);
         engine.start();
-        toolbar.setTitle("Editor - " + file_name);
+        toolbar.setTitle("SR-Builder");
+        refreshDocumentTabs();
+    }
+
+    private void refreshDocumentTabs() {
+        if (documentTabs == null) return;
+        documentTabs.removeAllViews();
+        for (EditorDocument document : openDocuments) {
+            LinearLayout tab = new LinearLayout(this);
+            tab.setGravity(android.view.Gravity.CENTER_VERTICAL);
+            tab.setOrientation(LinearLayout.HORIZONTAL);
+            tab.setPadding(dp(5), 0, dp(3), 0);
+            android.graphics.drawable.GradientDrawable tabBg = new android.graphics.drawable.GradientDrawable();
+            tabBg.setColor(document == activeDocument ? 0xFF303030 : 0xFF1B1B1B);
+            tabBg.setCornerRadius(dp(5));
+            tab.setBackground(tabBg);
+            TextView label = new TextView(this);
+            label.setText((document.dirty ? "• " : "") + document.name);
+            label.setTextSize(11);
+            label.setSingleLine(true);
+            label.setOnClickListener(v -> { captureActiveDocument(); activateDocument(document); });
+            tab.addView(label, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, dp(22)));
+            TextView close = new TextView(this);
+            close.setText("×");
+            close.setTextSize(18);
+            close.setPadding(dp(4), 0, dp(2), 0);
+            close.setOnClickListener(v -> closeDocument(document));
+            tab.addView(close, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, dp(22)));
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, dp(22));
+            lp.rightMargin = dp(4);
+            documentTabs.addView(tab, lp);
+        }
+        documentTabs.setVisibility(openDocuments.isEmpty() ? View.GONE : View.VISIBLE);
+        updateDocumentMenuVisibility();
+    }
+
+    private void updateDocumentMenuVisibility() {
+        if (menu == null) return;
+        boolean hasOpenDocument = !openDocuments.isEmpty() && activeDocument != null;
+        menu.findItem(R.id.code_errors).setVisible(hasOpenDocument);
+        menu.findItem(R.id.undo).setVisible(hasOpenDocument);
+        menu.findItem(R.id.redo).setVisible(hasOpenDocument);
+        menu.findItem(R.id.save_current).setVisible(hasOpenDocument);
+    }
+
+    private void undoActiveDocument() {
+        if (activeDocument == null || activeDocument.undoHistory.isEmpty()) return;
+        String current = engine.getEditor().getText();
+        String previous = activeDocument.undoHistory.remove(activeDocument.undoHistory.size() - 1);
+        activeDocument.redoHistory.add(current);
+        restoringDocument = true;
+        engine.getEditor().setText(previous, 1);
+        activeDocument.text = previous;
+        restoringDocument = false;
+        activeDocument.dirty = true;
+        saved_file = false;
+        refreshDocumentTabs();
+    }
+
+    private void redoActiveDocument() {
+        if (activeDocument == null || activeDocument.redoHistory.isEmpty()) return;
+        String current = engine.getEditor().getText();
+        String next = activeDocument.redoHistory.remove(activeDocument.redoHistory.size() - 1);
+        activeDocument.undoHistory.add(current);
+        restoringDocument = true;
+        engine.getEditor().setText(next, 1);
+        activeDocument.text = next;
+        restoringDocument = false;
+        activeDocument.dirty = true;
+        saved_file = false;
+        refreshDocumentTabs();
+    }
+
+    private int dp(float value) {
+        return (int) (value * getResources().getDisplayMetrics().density + 0.5f);
+    }
+
+    private void closeDocument(EditorDocument document) {
+        if (document == activeDocument) captureActiveDocument();
+        if (document.dirty) {
+            new AlertDialog.Builder(this).setMessage("File " + document.name + " memiliki perubahan yang belum disimpan. Tutup tanpa menyimpan?")
+                    .setPositiveButton("Tutup", (d, w) -> removeDocument(document))
+                    .setNegativeButton("Batal", null).show();
+        } else removeDocument(document);
+    }
+
+    private void removeDocument(EditorDocument document) {
+        int index = openDocuments.indexOf(document);
+        openDocuments.remove(document);
+        if (document == activeDocument) {
+            activeDocument = null;
+            if (!openDocuments.isEmpty()) activateDocument(openDocuments.get(Math.max(0, index - 1)));
+            else {
+                file_name = null;
+                saved_file = true;
+                engine.getEditor().setText("", 1);
+                engine.getEditor().setVisibility(View.GONE);
+                btnopenFile.setVisibility(View.VISIBLE);
+                toolbar.setTitle("SR-Builder");
+                refreshDocumentTabs();
+                updateDocumentMenuVisibility();
+            }
+        } else refreshDocumentTabs();
     }
 
     public void updateMenuIcon() {
@@ -438,6 +648,32 @@ public class MainActivity extends AppCompatActivity {
             return new String(data);
         } catch (Exception e) {}
         return null;
+    }
+
+    private void saveCurrentDocument() {
+        if (activeDocument == null) {
+            Toast.makeText(this, getString(R.string.open_a_file), Toast.LENGTH_SHORT).show();
+            return;
+        }
+        if (activeDocument.uri == null) {
+            // New/decompiled documents have no writable source URI yet.
+            performFunction(SAVE_FILE);
+            return;
+        }
+        try {
+            OutputStream out = getContentResolver().openOutputStream(activeDocument.uri, "wt");
+            if (out == null) throw new IOException("Tidak dapat membuka file untuk ditulis");
+            out.write(engine.getEditor().getText().getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            out.flush();
+            out.close();
+            activeDocument.text = engine.getEditor().getText();
+            activeDocument.dirty = false;
+            saved_file = true;
+            refreshDocumentTabs();
+            Toast.makeText(this, getString(R.string.file_saved), Toast.LENGTH_SHORT).show();
+        } catch (Exception e) {
+            Toast.makeText(this, getString(R.string.save_failed) + ": " + e.getMessage(), Toast.LENGTH_LONG).show();
+        }
     }
 
     public void saveFileText(OutputStream out) {

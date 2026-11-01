@@ -25,17 +25,37 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 app:navigationIcon="@drawable/ic_drawer_menu_24px"
-                app:title="Editor"/>
+                app:title="SR-Builder"
+                app:titleTextAppearance="@style/SRToolbarTitle"/>
+
+            <HorizontalScrollView
+                android:id="@+id/document_tabs_scroll"
+                android:layout_width="match_parent"
+                android:layout_height="26dp"
+                android:fillViewport="false"
+                android:scrollbars="none"
+                android:background="#121212">
+                <LinearLayout
+                    android:id="@+id/document_tabs"
+                    android:layout_width="wrap_content"
+                    android:layout_height="match_parent"
+                    android:orientation="horizontal"
+                    android:gravity="center_vertical"
+                    android:paddingStart="4dp"
+                    android:paddingEnd="4dp"
+                    android:visibility="gone"/>
+            </HorizontalScrollView>
 
         </com.google.android.material.appbar.AppBarLayout>
 
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="match_parent"
-            android:layout_marginTop="55dp"
+            android:layout_marginTop="81dp"
             android:layout_gravity="center"
             android:gravity="center"
-            android:orientation="vertical">
+            android:orientation="vertical"
+            android:background="#121212">
             <com.github.ahmadaghazadeh.editor.widget.CodeEditor
                 app:code=""
                 app:isReadOnly="false"

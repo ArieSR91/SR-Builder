@@ -109,6 +109,7 @@ public class TextProcessor extends AppCompatMultiAutoCompleteTextView implements
     private boolean mVerticalScrollGesture = false;
     private boolean mTouchStartedOnCursorHandle = false;
     private boolean mTouchDownDispatched = false;
+    private boolean mNativeSelectionGesture = false;
     private MotionEvent mDeferredDownEvent;
     private final Handler mTouchHandler = new Handler();
     private final Runnable mDispatchDeferredDown = new Runnable() {
@@ -506,14 +507,37 @@ public class TextProcessor extends AppCompatMultiAutoCompleteTextView implements
     }
 
     /**
-     * Keep the editor viewport where the user positioned it while typing.
-     * TextView normally scrolls automatically to bring the caret into view;
-     * for this code editor that makes the visible text jump to the end of a
-     * long line. Manual scrolling is still handled by the editor's touch logic.
+     * Keep the horizontal viewport stable while the caret remains visible, but
+     * let TextView reveal it when an edit moves the caret beyond either edge.
+     * The native implementation also keeps cursor/handle geometry synchronized
+     * with the TextView Layout after horizontal scrolling.
      */
     @Override
     public boolean bringPointIntoView(int offset) {
-        return false;
+        final int previousScrollX = getScrollX();
+        final android.text.Layout textLayout = getLayout();
+        if (textLayout == null || offset < 0 || getWidth() <= 0) {
+            return super.bringPointIntoView(offset);
+        }
+
+        final int safeOffset = Math.min(offset, textLayout.getText().length());
+        final float caretContentX = textLayout.getPrimaryHorizontal(safeOffset)
+                + getCompoundPaddingLeft();
+        final int visibleLeft = previousScrollX + getCompoundPaddingLeft();
+        final int visibleRight = previousScrollX + getWidth() - getCompoundPaddingRight();
+        final boolean caretOutsideHorizontalViewport = caretContentX < visibleLeft
+                || caretContentX > visibleRight;
+
+        boolean moved = super.bringPointIntoView(offset);
+        if (!caretOutsideHorizontalViewport && getScrollX() != previousScrollX) {
+            // The caret was already on-screen: do not let TextView nudge the
+            // horizontal viewport merely because it is close to the line edge.
+            scrollTo(previousScrollX, getScrollY());
+        }
+        // TextView updates its cursor controller from scroll changes. Request a
+        // fresh draw so the insertion marker and waterdrop use the same layout.
+        postInvalidateOnAnimation();
+        return moved;
     }
 
     @Override
@@ -898,9 +922,37 @@ public class TextProcessor extends AppCompatMultiAutoCompleteTextView implements
 
     //region SCROLLER_METHODS
 
+    private boolean mRefreshingCaretAfterScroll;
+
     @Override
     public void onScrollChanged(int horiz, int vert, int oldHoriz, int oldVert) {
         super.onScrollChanged(horiz, vert, oldHoriz, oldVert);
+        // TextView's insertion controller normally follows native scroll changes.
+        // This editor also scrolls its TextView directly for diagonal/fling gestures;
+        // re-apply the unchanged collapsed selection after the scroll settles so the
+        // insertion handle is recalculated from the final Layout + scroll offsets.
+        if (!mRefreshingCaretAfterScroll && getSelectionStart() == getSelectionEnd()) {
+            final int caretOffset = getSelectionEnd();
+            final int expectedX = horiz;
+            final int expectedY = vert;
+            postOnAnimation(() -> {
+                if (mRefreshingCaretAfterScroll || !isAttachedToWindow()
+                        || getSelectionStart() != caretOffset
+                        || getSelectionEnd() != caretOffset
+                        || getScrollX() != expectedX || getScrollY() != expectedY) {
+                    return;
+                }
+                mRefreshingCaretAfterScroll = true;
+                try {
+                    // Re-setting the same offset refreshes TextView's selection spans
+                    // and cursor controller without changing the document caret.
+                    setSelection(caretOffset);
+                    postInvalidateOnAnimation();
+                } finally {
+                    mRefreshingCaretAfterScroll = false;
+                }
+            });
+        }
         if (mScrollChangedListeners != null) {
             for (OnScrollChangedListener l : mScrollChangedListeners) {
                 l.onScrollChanged(horiz, vert, oldHoriz, oldVert);
@@ -939,18 +991,14 @@ public class TextProcessor extends AppCompatMultiAutoCompleteTextView implements
                 mTouchDownSelectionStart = getSelectionStart();
                 mTouchDownSelectionEnd = getSelectionEnd();
                 mTouchStartedOnCursorHandle = isTouchNearCursorHandle(event.getX(), event.getY());
-                mTouchDownDispatched = false;
+                // A pre-existing selection or insertion handle belongs to TextView. Keep
+                // the entire gesture native so Android can drag either selection endpoint
+                // and perform its built-in edge auto-scroll.
+                mNativeSelectionGesture = mTouchDownSelectionStart != mTouchDownSelectionEnd
+                        || mTouchStartedOnCursorHandle;
+                mTouchDownDispatched = true;
                 cancelDeferredDownEvent();
-                if (mTouchStartedOnCursorHandle) {
-                    // Keep Android's native insertion-handle drag behavior intact.
-                    mTouchDownDispatched = true;
-                    super.onTouchEvent(event);
-                } else {
-                    // Do not let TextView move the caret on ACTION_DOWN. Wait until we know
-                    // whether this is a tap, a long press, or a horizontal viewport swipe.
-                    mDeferredDownEvent = MotionEvent.obtain(event);
-                    mTouchHandler.postDelayed(mDispatchDeferredDown, 2500L);
-                }
+                super.onTouchEvent(event);
                 break;
             case MotionEvent.ACTION_MOVE:
                 if (mVelocityTracker != null) mVelocityTracker.addMovement(event);
@@ -958,6 +1006,17 @@ public class TextProcessor extends AppCompatMultiAutoCompleteTextView implements
                 float dyFromDown = event.getY() - mTouchDownY;
                 boolean crossedHorizontalSlop = Math.abs(dxFromDown) > mHorizontalTouchSlop;
                 boolean crossedVerticalSlop = Math.abs(dyFromDown) > mHorizontalTouchSlop;
+                // Long-press selection is created by TextView after ACTION_DOWN. Detect
+                // that transition before classifying movement as a viewport scroll.
+                if (!mNativeSelectionGesture && getSelectionStart() != getSelectionEnd()) {
+                    mNativeSelectionGesture = true;
+                }
+                if (mNativeSelectionGesture) {
+                    super.onTouchEvent(event);
+                    mPreviousTouchX = event.getX();
+                    mPreviousTouchY = event.getY();
+                    break;
+                }
                 if (!mTouchStartedOnCursorHandle
                         && !mHorizontalScrollGesture && !mVerticalScrollGesture
                         && (crossedHorizontalSlop || crossedVerticalSlop)) {
@@ -1051,6 +1110,7 @@ public class TextProcessor extends AppCompatMultiAutoCompleteTextView implements
                 mHorizontalScrollGesture = false;
                 mVerticalScrollGesture = false;
                 mTouchStartedOnCursorHandle = false;
+                mNativeSelectionGesture = false;
                 mTouchDownDispatched = false;
                 mTouchDownSelectionStart = mTouchDownSelectionEnd = -1;
                 break;
@@ -1060,6 +1120,7 @@ public class TextProcessor extends AppCompatMultiAutoCompleteTextView implements
                 mHorizontalScrollGesture = false;
                 mVerticalScrollGesture = false;
                 mTouchStartedOnCursorHandle = false;
+                mNativeSelectionGesture = false;
                 mTouchDownDispatched = false;
                 mTouchDownSelectionStart = mTouchDownSelectionEnd = -1;
                 if (mVelocityTracker != null) {

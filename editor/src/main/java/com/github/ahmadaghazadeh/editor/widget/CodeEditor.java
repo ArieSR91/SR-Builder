@@ -17,6 +17,7 @@ import android.text.TextWatcher;
 import android.util.AttributeSet;
 import android.util.Log;
 import android.view.Gravity;
+import android.view.View;
 import android.view.ViewTreeObserver;
 import android.widget.FrameLayout;
 import android.widget.LinearLayout;
@@ -91,6 +92,17 @@ public class CodeEditor extends FrameLayout {
         view.setShowExtendedKeyboard(isShowExtendedKeyboard);
     }
 
+    public void addOnTextChange(ICodeEditorTextChange listener) {
+        if (editor == null || listener == null) return;
+        editor.addTextChangedListener(new TextWatcher() {
+            @Override public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
+            @Override public void onTextChanged(CharSequence s, int start, int before, int count) {}
+            @Override public void afterTextChanged(Editable value) {
+                listener.onTextChange(value.toString());
+            }
+        });
+    }
+
     public void setOnTextChange(ICodeEditorTextChange onTextChange) {
         codeEditorTextChange = onTextChange;
         editor.addTextChangedListener(new TextWatcher() {
@@ -158,6 +170,11 @@ public class CodeEditor extends FrameLayout {
             TypedArray a = getContext().getTheme().obtainStyledAttributes(attrs, R.styleable.ThemeAttributes, 0, 0);
             try {
                 int colorResource = a.getColor(R.styleable.ThemeAttributes_colorDocBackground, getResources().getColor(R.color.colorDocBackground));
+                // Keep every layer of the editor stack on the document surface.
+                // The outer CodeEditor frame and its inner root can both become
+                // visible around the measured symbol toolbar or during layout.
+                setBackgroundColor(colorResource);
+                rootView.setBackgroundColor(colorResource);
                 editor.setBackgroundColor(colorResource);
             } finally {
                 a.recycle();
@@ -197,23 +214,30 @@ public class CodeEditor extends FrameLayout {
             editor.enableUndoRedoStack();
 
             recyclerView = new ExtendedKeyboard(context);
-            // Use the original toolbar elevation, translationZ, background,
-            // overscroll, outline and state-list animation behavior.
+            recyclerView.setBackgroundColor(android.graphics.Color.WHITE);
+            recyclerView.setOverScrollMode(View.OVER_SCROLL_NEVER);
+            // Restore the raised symbol-toolbar surface and its native shadow.
+            float toolbarElevation = 4f * getResources().getDisplayMetrics().density;
+            recyclerView.setElevation(toolbarElevation);
+            recyclerView.setTranslationZ(toolbarElevation);
 
-            rootView.getViewTreeObserver().addOnGlobalLayoutListener(new ViewTreeObserver.OnGlobalLayoutListener() {
-                @Override
-                public void onGlobalLayout() {
-                    int height = rootView.getHeight(); //height is ready
-                    if (preHeight != height) {
-                        FrameLayout.LayoutParams recyclerViewParam = new FrameLayout.LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT);
-                        recyclerViewParam.setMargins(0, height - 100, 0, 0);
-                        recyclerView.setLayoutParams(recyclerViewParam);
-                        paramsTxtprocessor.setMargins(0, 0, 0, 100);
-                        editor.setLayoutParams(paramsTxtprocessor);
-                        preHeight = height;
-                    }
-                }
-            });
+            // Keep the editor surface continuous behind the symbol toolbar. The toolbar
+            // is an overlay anchored to the bottom of this FrameLayout; reserving a
+            // second bottom inset here left an exposed strip between the editor and bar.
+            // Its native elevation/translationZ supplies the shadow without a layout gap.
+            FrameLayout.LayoutParams keyboardParams = new FrameLayout.LayoutParams(
+                    LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT,
+                    Gravity.BOTTOM | Gravity.START);
+            recyclerView.setLayoutParams(keyboardParams);
+            recyclerView.bringToFront();
+            recyclerView.setElevation(toolbarElevation);
+            recyclerView.setTranslationZ(toolbarElevation);
+            // Keep the text viewport above the overlaid symbol toolbar. Reducing
+            // the viewport (instead of adding editor padding) gives the final line
+            // a real scroll range without painting an extra blank/black strip.
+            recyclerView.addOnLayoutChangeListener((view, left, top, right, bottom,
+                                                     oldLeft, oldTop, oldRight, oldBottom) ->
+                    updateEditorViewportForToolbar());
             recyclerView.setListener((view, symbol) -> {
                         if (symbol.getShowText().endsWith("Tab") && tab_listener != null) {
                             String result = tab_listener.OnTabClick();
@@ -283,6 +307,21 @@ public class CodeEditor extends FrameLayout {
     public void setShowExtendedKeyboard(Boolean showExtendedKeyboard) {
         if (recyclerView != null) {
             recyclerView.setVisibility(showExtendedKeyboard ? VISIBLE : GONE);
+            editor.post(this::updateEditorViewportForToolbar);
+        }
+    }
+
+    private void updateEditorViewportForToolbar() {
+        if (editor == null || recyclerView == null) return;
+        int toolbarHeight = recyclerView.getVisibility() == VISIBLE
+                ? recyclerView.getHeight() : 0;
+        android.view.ViewGroup.LayoutParams raw = editor.getLayoutParams();
+        if (!(raw instanceof FrameLayout.LayoutParams)) return;
+
+        FrameLayout.LayoutParams params = (FrameLayout.LayoutParams) raw;
+        if (params.bottomMargin != toolbarHeight) {
+            params.bottomMargin = toolbarHeight;
+            editor.setLayoutParams(params);
         }
     }
 

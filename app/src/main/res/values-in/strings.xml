@@ -34,7 +34,7 @@
     <string name="opcode_example">Contoh: %1$s: %2$s</string>
     <string name="new_file">Baru</string>
     <string name="open_file">Buka</string>
-    <string name="save_file">Simpan</string>
+    <string name="save_file">Simpan sebagai</string>
     <string name="search_opcode">Cari opcode</string>
     <string name="compile">Kompilasi</string>
     <string name="decompile">Dekompilasi</string>
@@ -64,4 +64,6 @@
     <string name="select_game_title">Pilih game tujuan</string>
     <string name="game_pc">GTA SA PC</string>
     <string name="game_mobile">GTA SA Mobile</string>
+    <string name="file_saved">File berhasil disimpan</string>
+    <string name="save_failed">Tidak dapat menyimpan file</string>
 </resources>

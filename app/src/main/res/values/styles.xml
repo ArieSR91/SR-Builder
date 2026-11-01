@@ -12,4 +12,8 @@
         <!--Alpha can be added optionally to achieve nice color blend-->
         <item name="android:alpha">0.3</item>
     </style>
+
+    <style name="SRToolbarTitle" parent="TextAppearance.Widget.AppCompat.Toolbar.Title">
+        <item name="android:textSize">16sp</item>
+    </style>
 </resources>

@@ -33,7 +33,7 @@
     <string name="opcode_example">Example: %1$s: %2$s</string>
     <string name="new_file">New</string>
     <string name="open_file">Open</string>
-    <string name="save_file">Save</string>
+    <string name="save_file">Save as</string>
     <string name="search_opcode">Search opcode</string>
     <string name="compile">Compile</string>
     <string name="decompile">Decompile</string>
@@ -62,4 +62,6 @@
     <string name="select_game_title">Select target game</string>
     <string name="game_pc">GTA SA PC</string>
     <string name="game_mobile">GTA SA Mobile</string>
+    <string name="file_saved">File saved</string>
+    <string name="save_failed">Unable to save file</string>
 </resources>

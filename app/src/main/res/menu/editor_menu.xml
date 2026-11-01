@@ -8,7 +8,7 @@
         android:title="@string/code_errors"
         android:orderInCategory="1"
         android:visible="false"
-        app:showAsAction="ifRoom" />
+        app:showAsAction="always" />
 
     <item
         android:id="@+id/undo"
@@ -16,7 +16,7 @@
         android:title="@string/undo"
         android:orderInCategory="2"
         android:visible="false"
-        app:showAsAction="ifRoom" />
+        app:showAsAction="always" />
 
     <item
         android:id="@+id/redo"
@@ -24,6 +24,14 @@
         android:title="@string/redo"
         android:orderInCategory="3"
         android:visible="false"
-        app:showAsAction="ifRoom" />
+        app:showAsAction="always" />
+
+    <item
+        android:id="@+id/save_current"
+        android:icon="@drawable/ic_save_current"
+        android:title="@string/save"
+        android:orderInCategory="4"
+        android:visible="false"
+        app:showAsAction="always" />
 
 </menu>
