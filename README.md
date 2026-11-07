@@ -37,6 +37,7 @@ Now you can type if, jf, jump, etc. without the code in front of it.
 Custom data folder:
 
 - /sdcard/sr-builder/sa_mobile/
+- /sdcard/sr-builder/sa_pc/
 
 Optional custom files read from this folder:
 
@@ -44,6 +45,7 @@ Optional custom files read from this folder:
 - vehicles.ide
 - opcodes.txt
 - SASCM.ini
+[More](README-SA-MOBILE-CUSTOM-DATA.txt)
 
 ## Disclaimer
 
