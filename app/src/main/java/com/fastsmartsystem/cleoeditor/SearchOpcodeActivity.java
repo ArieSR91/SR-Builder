@@ -54,29 +54,46 @@ public class SearchOpcodeActivity extends AppCompatActivity implements OnOpcodeI
         // Opcode search intentionally uses the plain-text opcodes.txt as its sole source.
         // Keep the line exactly as authored there (e.g. "0004: $120 = 0") instead of
         // generating a template from the binary opcode database.
-        op_loader = new OpcodesLoader(App.dataDirectory + "sa_mobile.dat");
+        int gameTarget = getSharedPreferences("cleo_editor_prefs", MODE_PRIVATE)
+                .getInt("game_target", MainActivity.GAME_MOBILE);
+        boolean isPc = gameTarget == MainActivity.GAME_PC;
+        op_loader = new OpcodesLoader(App.dataDirectory + (isPc ? "sa.dat" : "sa_mobile.dat"));
         ArrayList<OpcodeItem> opcodes = new ArrayList<>();
-        java.io.File customOpcodeFile = new java.io.File("/sdcard/sr-builder/sa_mobile/opcodes.txt");
-        try (BufferedReader reader = new BufferedReader(new InputStreamReader(
-                customOpcodeFile.isFile() && customOpcodeFile.canRead()
-                        ? new java.io.FileInputStream(customOpcodeFile)
-                        : getAssets().open("mobile/opcodes.txt"), StandardCharsets.UTF_8))) {
-            String line;
-            while ((line = reader.readLine()) != null) {
-                String rawLine = line.trim();
-                if (rawLine.isEmpty() || rawLine.startsWith(";") || rawLine.startsWith("#")) continue;
-                int colon = rawLine.indexOf(':');
-                if (colon <= 0) continue;
-                int id;
-                try {
-                    id = Integer.parseInt(rawLine.substring(0, colon).trim(), 16);
-                } catch (NumberFormatException ignored) {
-                    continue;
+        java.io.File customOpcodeFile = new java.io.File(
+                isPc ? "/sdcard/sr-builder/sa_pc/opcodes.txt"
+                        : "/sdcard/sr-builder/sa_mobile/opcodes.txt");
+        try {
+            java.io.InputStream opcodeInput = null;
+            if (customOpcodeFile.isFile() && customOpcodeFile.canRead()) {
+                opcodeInput = new java.io.FileInputStream(customOpcodeFile);
+            } else if (!isPc) {
+                opcodeInput = getAssets().open("mobile/opcodes.txt");
+            }
+            if (opcodeInput == null) {
+                Toast.makeText(this, "opcodes.txt tidak ditemukan di folder "
+                        + (isPc ? "sa_pc" : "sa_mobile"), Toast.LENGTH_LONG).show();
+            }
+            try (BufferedReader reader = opcodeInput == null ? null : new BufferedReader(
+                    new InputStreamReader(opcodeInput, StandardCharsets.UTF_8))) {
+                if (reader != null) {
+                    String line;
+                    while ((line = reader.readLine()) != null) {
+                        String rawLine = line.trim();
+                        if (rawLine.isEmpty() || rawLine.startsWith(";") || rawLine.startsWith("#")) continue;
+                        int colon = rawLine.indexOf(':');
+                        if (colon <= 0) continue;
+                        int id;
+                        try {
+                            id = Integer.parseInt(rawLine.substring(0, colon).trim(), 16);
+                        } catch (NumberFormatException ignored) {
+                            continue;
+                        }
+                        opcodes.add(new OpcodeItem(rawLine, id));
+                    }
                 }
-                opcodes.add(new OpcodeItem(rawLine, id));
             }
         } catch (Exception e) {
-            android.util.Log.e("SearchOpcodeActivity", "Could not read mobile/opcodes.txt", e);
+            android.util.Log.e("SearchOpcodeActivity", "Could not read custom opcodes.txt", e);
             Toast.makeText(this, "Tidak dapat membaca opcodes.txt", Toast.LENGTH_LONG).show();
         }
         adapter = new OpcodeAdapter(opcodes, this);

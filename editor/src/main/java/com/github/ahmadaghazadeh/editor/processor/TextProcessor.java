@@ -412,6 +412,9 @@ public class TextProcessor extends AppCompatMultiAutoCompleteTextView implements
         mMaximumVelocity = configuration.getScaledMaximumFlingVelocity() * 100;
         mHorizontalTouchSlop = configuration.getScaledTouchSlop();
         mIdealMargin = Converter.dpAsPixels(this, 4);
+        // Drop the default bottom padding of the EditText style: TextView clips its text to the
+        // padding box, which hid the first/last visible lines behind empty strips at the top and above the toolbar.
+        setPadding(getPaddingLeft(), 0, getPaddingRight(), 0);
         setImeOptions(EditorInfo.IME_FLAG_NO_EXTRACT_UI);
         setOnKeyListener(this);
     }
@@ -922,37 +925,13 @@ public class TextProcessor extends AppCompatMultiAutoCompleteTextView implements
 
     //region SCROLLER_METHODS
 
-    private boolean mRefreshingCaretAfterScroll;
-
     @Override
     public void onScrollChanged(int horiz, int vert, int oldHoriz, int oldVert) {
         super.onScrollChanged(horiz, vert, oldHoriz, oldVert);
-        // TextView's insertion controller normally follows native scroll changes.
-        // This editor also scrolls its TextView directly for diagonal/fling gestures;
-        // re-apply the unchanged collapsed selection after the scroll settles so the
-        // insertion handle is recalculated from the final Layout + scroll offsets.
-        if (!mRefreshingCaretAfterScroll && getSelectionStart() == getSelectionEnd()) {
-            final int caretOffset = getSelectionEnd();
-            final int expectedX = horiz;
-            final int expectedY = vert;
-            postOnAnimation(() -> {
-                if (mRefreshingCaretAfterScroll || !isAttachedToWindow()
-                        || getSelectionStart() != caretOffset
-                        || getSelectionEnd() != caretOffset
-                        || getScrollX() != expectedX || getScrollY() != expectedY) {
-                    return;
-                }
-                mRefreshingCaretAfterScroll = true;
-                try {
-                    // Re-setting the same offset refreshes TextView's selection spans
-                    // and cursor controller without changing the document caret.
-                    setSelection(caretOffset);
-                    postInvalidateOnAnimation();
-                } finally {
-                    mRefreshingCaretAfterScroll = false;
-                }
-            });
-        }
+        // Do not re-apply setSelection() after viewport scrolling. TextView may
+        // call bringPointIntoView() from that operation and pull the horizontal
+        // viewport back toward the caret, interrupting diagonal scroll gestures.
+        postInvalidateOnAnimation();
         if (mScrollChangedListeners != null) {
             for (OnScrollChangedListener l : mScrollChangedListeners) {
                 l.onScrollChanged(horiz, vert, oldHoriz, oldVert);
@@ -1324,12 +1303,12 @@ public class TextProcessor extends AppCompatMultiAutoCompleteTextView implements
                 mGutterWidth += mIdealMargin;
                 if (getPaddingLeft() != mGutterWidth + mIdealMargin) {
                     setPadding(mGutterWidth + mIdealMargin,
-                            mIdealMargin, getPaddingRight(), getPaddingBottom());
+                            0, getPaddingRight(), 0);
                 }
             }
         } else if (mIdealMargin != getPaddingLeft()) {
             setPadding(mIdealMargin,
-                    mIdealMargin, getPaddingRight(), getPaddingBottom());
+                    0, getPaddingRight(), 0);
         }
     }
 

@@ -31,7 +31,7 @@
             <HorizontalScrollView
                 android:id="@+id/document_tabs_scroll"
                 android:layout_width="match_parent"
-                android:layout_height="26dp"
+                android:layout_height="24dp"
                 android:fillViewport="false"
                 android:scrollbars="none"
                 android:background="#121212">
@@ -51,8 +51,7 @@
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="match_parent"
-            android:layout_marginTop="81dp"
-            android:layout_gravity="center"
+            app:layout_behavior="@string/appbar_scrolling_view_behavior"
             android:gravity="center"
             android:orientation="vertical"
             android:background="#121212">

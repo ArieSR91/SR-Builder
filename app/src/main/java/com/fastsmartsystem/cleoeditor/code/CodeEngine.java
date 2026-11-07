@@ -38,6 +38,7 @@ public class CodeEngine implements CodeEditor.ICodeEditorTextChange, OnTabClickL
     private static final String pattern_var = "\\d+\\@|[sv][$@]\\d+|\\$\\w+";
     public String format = "";
     public boolean running = false;
+    private volatile boolean stopped = false;
     private String latent_opcode;
 
     public CodeEngine(MainActivity app, CodeEditor editor, IDECollector ide, OpcodesLoader scm) {
@@ -47,6 +48,10 @@ public class CodeEngine implements CodeEditor.ICodeEditorTextChange, OnTabClickL
         this.editor.setOnTextChange(this);
         this.editor.tab_listener = this;
         this.processor = editor.getTextProcessor();
+        // A new engine starts from a clean slate: drop the red error lines left by
+        // the previous engine (e.g. after switching the game target).
+        this.processor.errors.clear();
+        this.processor.invalidate();
 
         suggestions = new CodeSuggestions(processor);
         opcode_stack = new OpcodeStack();
@@ -74,14 +79,24 @@ public class CodeEngine implements CodeEditor.ICodeEditorTextChange, OnTabClickL
 
     public boolean hasErrors() { return errors.size() > 0; }
 
+    /** Stops the background thread; a stopped engine no longer touches the editor UI. */
+    public void stop() {
+        stopped = true;
+        running = false;
+        listener = null;
+    }
+
     protected void updateUI() {
+        if(stopped) return;
         editor.post(() -> {
+            if(stopped) return;
             processor.errors.clear();
             for(CodeError err : errors) {
                 if(err.line != -1) {
                     processor.errors.add(err.line - 1);
                 }
             }
+            processor.invalidate();
             app.updateMenuIcon();
         });
     }
@@ -102,7 +117,7 @@ public class CodeEngine implements CodeEditor.ICodeEditorTextChange, OnTabClickL
     }
 
     public void start() {
-        if(running) return;
+        if(running || stopped) return;
         running = true;
         new Thread(() -> {
             while(running) {
@@ -112,6 +127,7 @@ public class CodeEngine implements CodeEditor.ICodeEditorTextChange, OnTabClickL
                     // update interface
                     updateUI();
                 }
+                if(stopped) break;
                 if(listener != null) {
                     listener.Enqueue();
                     listener = null;

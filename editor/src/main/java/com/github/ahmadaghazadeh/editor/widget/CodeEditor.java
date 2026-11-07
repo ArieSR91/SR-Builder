@@ -35,7 +35,8 @@ import com.github.ahmadaghazadeh.editor.processor.utils.DefaultSetting;
 import com.github.ahmadaghazadeh.editor.processor.utils.ITextProcessorSetting;
 
 public class CodeEditor extends FrameLayout {
-    FrameLayout rootView;
+    LinearLayout rootView;
+    FrameLayout editorFrame;
     boolean isReadOnly = false;
     boolean isShowExtendedKeyboard = false;
     int preHeight = 0;
@@ -149,16 +150,22 @@ public class CodeEditor extends FrameLayout {
                 a.recycle();
 
             }
+            // Vertical stack: [editor frame (weight 1)] above [symbol toolbar]. The toolbar is
+            // a normal sibling below the text area, so no overlay, bottom margin or inset
+            // is needed and no empty strip can appear between the two.
             FrameLayout.LayoutParams rootViewParam = new FrameLayout.LayoutParams(RelativeLayout.LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT);
-            rootViewParam.gravity = Gravity.BOTTOM;
-            rootView = new FrameLayout(context);
+            rootView = new LinearLayout(context);
+            rootView.setOrientation(LinearLayout.VERTICAL);
             rootView.setLayoutParams(rootViewParam);
+            editorFrame = new FrameLayout(context);
+            editorFrame.setLayoutParams(new LinearLayout.LayoutParams(
+                    LayoutParams.MATCH_PARENT, 0, 1f));
             GutterView gutterView = new GutterView(context);
             LinearLayout.LayoutParams paramsGutter = new LinearLayout.LayoutParams(RelativeLayout.LayoutParams.WRAP_CONTENT, LayoutParams.MATCH_PARENT);
             //paramsGutter.alignWithParent = true;
             paramsGutter.gravity = Gravity.START;
             gutterView.setLayoutParams(paramsGutter);
-            rootView.addView(gutterView);
+            editorFrame.addView(gutterView);
 
 
             editor = new TextProcessor(context);
@@ -175,6 +182,7 @@ public class CodeEditor extends FrameLayout {
                 // visible around the measured symbol toolbar or during layout.
                 setBackgroundColor(colorResource);
                 rootView.setBackgroundColor(colorResource);
+                editorFrame.setBackgroundColor(colorResource);
                 editor.setBackgroundColor(colorResource);
             } finally {
                 a.recycle();
@@ -190,7 +198,7 @@ public class CodeEditor extends FrameLayout {
 
 
             editor.setLayerType(LAYER_TYPE_SOFTWARE, new TextPaint());
-            rootView.addView(editor);
+            editorFrame.addView(editor);
 
             editor.init(this);
             editor.setReadOnly(isReadOnly);
@@ -201,7 +209,7 @@ public class CodeEditor extends FrameLayout {
             fastParam.gravity = Gravity.END;
 
             mFastScrollerView.setLayoutParams(fastParam);
-            rootView.addView(mFastScrollerView);
+            editorFrame.addView(mFastScrollerView);
             mFastScrollerView.link(editor); //подключаем FastScroller к редактору
 
             gutterView.link(editor, lineNumbers); //подключаем Gutter к редактору
@@ -216,28 +224,15 @@ public class CodeEditor extends FrameLayout {
             recyclerView = new ExtendedKeyboard(context);
             recyclerView.setBackgroundColor(android.graphics.Color.WHITE);
             recyclerView.setOverScrollMode(View.OVER_SCROLL_NEVER);
-            // Restore the raised symbol-toolbar surface and its native shadow.
-            float toolbarElevation = 4f * getResources().getDisplayMetrics().density;
-            recyclerView.setElevation(toolbarElevation);
-            recyclerView.setTranslationZ(toolbarElevation);
+            // No elevation/translationZ here: the native shadow of the white bar is drawn
+            // over the editor text and shows up as a black band above the toolbar.
+            recyclerView.setElevation(0f);
+            recyclerView.setTranslationZ(0f);
 
-            // Keep the editor surface continuous behind the symbol toolbar. The toolbar
-            // is an overlay anchored to the bottom of this FrameLayout; reserving a
-            // second bottom inset here left an exposed strip between the editor and bar.
-            // Its native elevation/translationZ supplies the shadow without a layout gap.
-            FrameLayout.LayoutParams keyboardParams = new FrameLayout.LayoutParams(
-                    LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT,
-                    Gravity.BOTTOM | Gravity.START);
+            // The toolbar sits below the editor frame in the vertical stack (no overlay).
+            LinearLayout.LayoutParams keyboardParams = new LinearLayout.LayoutParams(
+                    LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT);
             recyclerView.setLayoutParams(keyboardParams);
-            recyclerView.bringToFront();
-            recyclerView.setElevation(toolbarElevation);
-            recyclerView.setTranslationZ(toolbarElevation);
-            // Keep the text viewport above the overlaid symbol toolbar. Reducing
-            // the viewport (instead of adding editor padding) gives the final line
-            // a real scroll range without painting an extra blank/black strip.
-            recyclerView.addOnLayoutChangeListener((view, left, top, right, bottom,
-                                                     oldLeft, oldTop, oldRight, oldBottom) ->
-                    updateEditorViewportForToolbar());
             recyclerView.setListener((view, symbol) -> {
                         if (symbol.getShowText().endsWith("Tab") && tab_listener != null) {
                             String result = tab_listener.OnTabClick();
@@ -271,6 +266,7 @@ public class CodeEditor extends FrameLayout {
                     }
             );
             setShowExtendedKeyboard(isShowExtendedKeyboard);
+            rootView.addView(editorFrame);
             rootView.addView(recyclerView);
             addView(rootView);
 
@@ -307,21 +303,6 @@ public class CodeEditor extends FrameLayout {
     public void setShowExtendedKeyboard(Boolean showExtendedKeyboard) {
         if (recyclerView != null) {
             recyclerView.setVisibility(showExtendedKeyboard ? VISIBLE : GONE);
-            editor.post(this::updateEditorViewportForToolbar);
-        }
-    }
-
-    private void updateEditorViewportForToolbar() {
-        if (editor == null || recyclerView == null) return;
-        int toolbarHeight = recyclerView.getVisibility() == VISIBLE
-                ? recyclerView.getHeight() : 0;
-        android.view.ViewGroup.LayoutParams raw = editor.getLayoutParams();
-        if (!(raw instanceof FrameLayout.LayoutParams)) return;
-
-        FrameLayout.LayoutParams params = (FrameLayout.LayoutParams) raw;
-        if (params.bottomMargin != toolbarHeight) {
-            params.bottomMargin = toolbarHeight;
-            editor.setLayoutParams(params);
         }
     }
 

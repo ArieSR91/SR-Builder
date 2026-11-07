@@ -9,7 +9,6 @@ An unofficial Sanny Builder port for Android, written in Java. It allows you to 
 - Compatible with Android versions up to Android 13
 - Dark Theme for editor
 - Syntax highlighting using Kali Linux Dark by Arie-SR91 (Me)
-- Add new language: Indonesian and Spanish
 
 ## Requirements
 

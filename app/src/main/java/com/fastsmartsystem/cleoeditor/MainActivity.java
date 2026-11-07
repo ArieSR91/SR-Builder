@@ -79,6 +79,7 @@ public class MainActivity extends AppCompatActivity {
     Toolbar toolbar;
     private boolean waitingForAllFilesAccess = false;
     private static final String CUSTOM_SA_MOBILE_DIR = "/sdcard/sr-builder/sa_mobile/";
+    private static final String CUSTOM_SA_PC_DIR = "/sdcard/sr-builder/sa_pc/";
 
     private static class EditorDocument {
         String name;
@@ -159,8 +160,9 @@ public class MainActivity extends AppCompatActivity {
     private void initFiles() {
         App.dataDirectory = getExternalFilesDir(null).getAbsolutePath() + "/";
         extractAssets();
+        loadGameTarget();
         ide_collector = new IDECollector();
-        File customDir = new File(CUSTOM_SA_MOBILE_DIR);
+        File customDir = new File(gameTarget == GAME_PC ? CUSTOM_SA_PC_DIR : CUSTOM_SA_MOBILE_DIR);
         ensureCustomFolderExists();
         File customPeds = new File(customDir, "peds.ide");
         File customVehicles = new File(customDir, "vehicles.ide");
@@ -171,7 +173,6 @@ public class MainActivity extends AppCompatActivity {
         ide_collector.collect(App.dataDirectory + "globals.ide");
         if (!customPeds.isFile() || !customPeds.canRead()) ide_collector.collect(App.dataDirectory + "peds.ide");
         if (!customVehicles.isFile() || !customVehicles.canRead()) ide_collector.collect(App.dataDirectory + "vehicles.ide");
-        loadGameTarget();
         loadOpcodes();
     }
 
@@ -184,10 +185,15 @@ public class MainActivity extends AppCompatActivity {
 
     private void ensureCustomFolderExists() {
         if (!hasCustomFolderAccess()) return;
-        File folder = new File(CUSTOM_SA_MOBILE_DIR);
-        if (!folder.exists()) {
-            boolean created = folder.mkdirs();
-            if (created) android.util.Log.i("SRBuilder", "Created custom data folder: " + folder.getAbsolutePath());
+        File mobileFolder = new File(CUSTOM_SA_MOBILE_DIR);
+        if (!mobileFolder.exists()) {
+            boolean created = mobileFolder.mkdirs();
+            if (created) android.util.Log.i("SRBuilder", "Created custom data folder: " + mobileFolder.getAbsolutePath());
+        }
+        File pcFolder = new File(CUSTOM_SA_PC_DIR);
+        if (!pcFolder.exists()) {
+            boolean created = pcFolder.mkdirs();
+            if (created) android.util.Log.i("SRBuilder", "Created custom data folder: " + pcFolder.getAbsolutePath());
         }
     }
 
@@ -199,8 +205,8 @@ public class MainActivity extends AppCompatActivity {
         }
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return;
         new AlertDialog.Builder(this)
-                .setTitle("Akses folder sa_mobile")
-                .setMessage("Agar SR Builder dapat membuat folder " + CUSTOM_SA_MOBILE_DIR + " dan membaca peds.ide, vehicles.ide, opcodes.txt, SASCM.ini, SASCM.Mobile.ini, serta SASCM.CLEO.ini, izinkan akses semua file pada halaman pengaturan berikut.")
+                .setTitle("Akses folder custom")
+                .setMessage("Agar SR Builder dapat membuat folder " + CUSTOM_SA_MOBILE_DIR + " dan " + CUSTOM_SA_PC_DIR + ", serta membaca file konfigurasi di dalamnya, izinkan akses semua file pada halaman pengaturan berikut.")
                 .setPositiveButton("Buka pengaturan", (dialog, which) -> {
                     try {
                         waitingForAllFilesAccess = true;
@@ -225,7 +231,7 @@ public class MainActivity extends AppCompatActivity {
                 ensureCustomFolderExists();
                 initFiles();
                 initEngine();
-                Toast.makeText(this, "Data sa_mobile eksternal dimuat ulang.", Toast.LENGTH_SHORT).show();
+                Toast.makeText(this, "Folder custom eksternal dimuat ulang.", Toast.LENGTH_SHORT).show();
             }
         }
     }
@@ -233,17 +239,38 @@ public class MainActivity extends AppCompatActivity {
     private void loadOpcodes() {
         String datFile = gameTarget == GAME_PC ? "sa.dat" : "sa_mobile.dat";
         scm_loader = new OpcodesLoader(App.dataDirectory + datFile);
-        File customDir = new File(CUSTOM_SA_MOBILE_DIR);
-        // Load the user's Sanny Builder opcode definitions from the requested folder.
-        // All three files are considered; duplicate opcode IDs already present in the
-        // binary database or an earlier INI are safely ignored by OpcodesLoader.
-        String[] iniNames = {"SASCM.ini", "SASCM.Mobile.ini", "SASCM.CLEO.ini"};
+        // PC and Mobile opcode overrides are kept in separate custom folders.
+        // Only read the folder matching the currently selected game target.
+        File customDir = new File(gameTarget == GAME_PC ? CUSTOM_SA_PC_DIR : CUSTOM_SA_MOBILE_DIR);
+        // Load every SASCM*.ini override in the PC folder (for example
+        // SASCM.CLEO+.ini, SASCM.Clipboard.ini, SASCM.Debug.ini, etc.).
+        // Mobile keeps its established, explicitly supported file list.
         boolean loadedCustomCleo = false;
-        for (String iniName : iniNames) {
-            File ini = new File(customDir, iniName);
-            if (hasCustomFolderAccess() && ini.isFile() && ini.canRead()) {
-                scm_loader.loadIni(ini.getAbsolutePath());
-                if ("SASCM.CLEO.ini".equalsIgnoreCase(iniName)) loadedCustomCleo = true;
+        if (hasCustomFolderAccess() && customDir.isDirectory()) {
+            if (gameTarget == GAME_PC) {
+                File[] iniFiles = customDir.listFiles((dir, name) ->
+                        name.regionMatches(true, 0, "SASCM", 0, 5)
+                                && name.toLowerCase(java.util.Locale.ROOT).endsWith(".ini"));
+                if (iniFiles != null) {
+                    java.util.Arrays.sort(iniFiles, (a, b) ->
+                            String.CASE_INSENSITIVE_ORDER.compare(a.getName(), b.getName()));
+                    for (File ini : iniFiles) {
+                        if (ini.isFile() && ini.canRead()) {
+                            scm_loader.loadIni(ini.getAbsolutePath());
+                            if ("SASCM.CLEO.ini".equalsIgnoreCase(ini.getName())) {
+                                loadedCustomCleo = true;
+                            }
+                        }
+                    }
+                }
+            } else {
+                String[] iniNames = {"SASCM.ini", "SASCM.Mobile.ini", "SASCM.CLEO.ini"};
+                for (String iniName : iniNames) {
+                    File ini = new File(customDir, iniName);
+                    if (ini.isFile() && ini.canRead()) {
+                        scm_loader.loadIni(ini.getAbsolutePath());
+                    }
+                }
             }
         }
         // Keep the bundled CLEO definitions as a fallback when using the PC opcode database.
@@ -278,7 +305,7 @@ public class MainActivity extends AppCompatActivity {
                 ensureCustomFolderExists();
                 initFiles();
                 initEngine();
-                Toast.makeText(this, "Folder sa_mobile siap digunakan.", Toast.LENGTH_SHORT).show();
+                Toast.makeText(this, "Folder custom PC dan Mobile siap digunakan.", Toast.LENGTH_SHORT).show();
             } else {
                 Toast.makeText(this, "Izin baca/tulis diperlukan untuk membuat folder sa_mobile dan membaca file konfigurasi.", Toast.LENGTH_LONG).show();
             }
@@ -286,6 +313,8 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void initEngine() {
+        // Retire the previous engine so its thread and stale error lines are gone.
+        if (engine != null) engine.stop();
         engine = new CodeEngine(this, findViewById(R.id.editor), ide_collector, scm_loader);
         compiler = new ScriptCompiler(scm_loader, ide_collector);
         decompiler = new ScriptDecompiler(scm_loader, ide_collector);
@@ -305,6 +334,10 @@ public class MainActivity extends AppCompatActivity {
                 refreshDocumentTabs();
             }
         });
+        // The new engine (new game target) must analyse the current text right away:
+        // this refreshes engine.format and the error list/red lines for the new target.
+        if (activeDocument != null) engine.start();
+        updateMenuIcon();
     }
 
     private void initIntent() {
@@ -417,8 +450,13 @@ public class MainActivity extends AppCompatActivity {
             } else if(function == SAVE_FILE) {
                 SaveLauncher.launch(file_name);
             } else if(function == COMPILE) {
-                if(engine.format != null) {
-                    SaveLauncher.launch(file_name.replace(".txt", engine.format));
+                String format = engine.format;
+                // PC CLEO scripts are always .cs; mobile takes .cs/.csa/.csi from {$CLEO ...}.
+                if((format == null || format.isEmpty()) && gameTarget == GAME_PC) format = ".cs";
+                if(format != null && !format.isEmpty()) {
+                    String base = file_name.toLowerCase(java.util.Locale.ROOT).endsWith(".txt")
+                            ? file_name.substring(0, file_name.length() - 4) : file_name;
+                    SaveLauncher.launch(base + format);
                 } else {
                     Toast.makeText(this, getString(R.string.no_cleo_format), Toast.LENGTH_SHORT).show();
                 }
