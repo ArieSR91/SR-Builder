@@ -531,8 +531,26 @@ public class TextProcessor extends AppCompatMultiAutoCompleteTextView implements
         final boolean caretOutsideHorizontalViewport = caretContentX < visibleLeft
                 || caretContentX > visibleRight;
 
+        final boolean hasSelection = getSelectionStart() != getSelectionEnd();
         boolean moved = super.bringPointIntoView(offset);
-        if (!caretOutsideHorizontalViewport && getScrollX() != previousScrollX) {
+        if (hasSelection) {
+            // A selection handle is being dragged: follow it. Do not undo TextView's
+            // scrolling, and add an extra step when the handle reaches a horizontal edge
+            // so long lines can be selected by dragging the handle to the screen edge.
+            final int edge = Math.round(getResources().getDisplayMetrics().density * 40f);
+            final int step = Math.round(getResources().getDisplayMetrics().density * 28f);
+            final int maxScrollX = Math.max(0, textLayout.getWidth() - getWidth()
+                    + getPaddingLeft() + getPaddingRight());
+            final float caretInView = textLayout.getPrimaryHorizontal(safeOffset)
+                    + getCompoundPaddingLeft() - getScrollX();
+            int newScrollX = getScrollX();
+            if (caretInView > getWidth() - edge) {
+                newScrollX = Math.min(maxScrollX, newScrollX + step);
+            } else if (caretInView < getCompoundPaddingLeft() + edge) {
+                newScrollX = Math.max(0, newScrollX - step);
+            }
+            if (newScrollX != getScrollX()) scrollTo(newScrollX, getScrollY());
+        } else if (!caretOutsideHorizontalViewport && getScrollX() != previousScrollX) {
             // The caret was already on-screen: do not let TextView nudge the
             // horizontal viewport merely because it is close to the line edge.
             scrollTo(previousScrollX, getScrollY());
@@ -970,11 +988,11 @@ public class TextProcessor extends AppCompatMultiAutoCompleteTextView implements
                 mTouchDownSelectionStart = getSelectionStart();
                 mTouchDownSelectionEnd = getSelectionEnd();
                 mTouchStartedOnCursorHandle = isTouchNearCursorHandle(event.getX(), event.getY());
-                // A pre-existing selection or insertion handle belongs to TextView. Keep
-                // the entire gesture native so Android can drag either selection endpoint
-                // and perform its built-in edge auto-scroll.
-                mNativeSelectionGesture = mTouchDownSelectionStart != mTouchDownSelectionEnd
-                        || mTouchStartedOnCursorHandle;
+                // Only a drag that starts on the insertion handle stays native. With an
+                // existing selection the selection handles are separate popup windows, so
+                // a drag on the text itself must scroll the viewport and keep the selection
+                // (a plain tap is still handled natively on ACTION_UP).
+                mNativeSelectionGesture = mTouchStartedOnCursorHandle;
                 mTouchDownDispatched = true;
                 cancelDeferredDownEvent();
                 super.onTouchEvent(event);
@@ -987,7 +1005,9 @@ public class TextProcessor extends AppCompatMultiAutoCompleteTextView implements
                 boolean crossedVerticalSlop = Math.abs(dyFromDown) > mHorizontalTouchSlop;
                 // Long-press selection is created by TextView after ACTION_DOWN. Detect
                 // that transition before classifying movement as a viewport scroll.
-                if (!mNativeSelectionGesture && getSelectionStart() != getSelectionEnd()) {
+                if (!mNativeSelectionGesture
+                        && mTouchDownSelectionStart == mTouchDownSelectionEnd
+                        && getSelectionStart() != getSelectionEnd()) {
                     mNativeSelectionGesture = true;
                 }
                 if (mNativeSelectionGesture) {

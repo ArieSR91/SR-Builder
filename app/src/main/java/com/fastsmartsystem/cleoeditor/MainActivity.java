@@ -629,13 +629,43 @@ public class MainActivity extends AppCompatActivity {
         menu.findItem(R.id.save_current).setVisible(hasOpenDocument);
     }
 
+    /**
+     * Replaces the editor text with {@code target} (undo/redo) and moves the caret to the end of
+     * the region that differs from {@code current}, scrolling it into view, instead of leaving
+     * the caret and viewport at line 1.
+     */
+    private void setTextAtChange(String current, String target) {
+        int max = Math.min(current.length(), target.length());
+        int prefix = 0;
+        while (prefix < max && current.charAt(prefix) == target.charAt(prefix)) prefix++;
+        int suffix = 0;
+        while (suffix < max - prefix
+                && current.charAt(current.length() - 1 - suffix) == target.charAt(target.length() - 1 - suffix)) suffix++;
+        final int caret = target.length() - suffix;
+
+        engine.getEditor().setText(target, 1);
+        final com.github.ahmadaghazadeh.editor.processor.TextProcessor tp = engine.getEditor().getTextProcessor();
+        tp.post(() -> {
+            android.text.Layout layout = tp.getLayout();
+            if (layout == null) return;
+            int pos = Math.max(0, Math.min(caret, tp.length()));
+            tp.setSelection(pos);
+            int line = layout.getLineForOffset(pos);
+            int visibleHeight = tp.getHeight() - tp.getCompoundPaddingTop() - tp.getCompoundPaddingBottom();
+            int maxScroll = Math.max(0, layout.getHeight() - visibleHeight);
+            int y = layout.getLineTop(line) - visibleHeight / 3;
+            tp.scrollTo(tp.getScrollX(), Math.max(0, Math.min(maxScroll, y)));
+            tp.bringPointIntoView(pos);
+        });
+    }
+
     private void undoActiveDocument() {
         if (activeDocument == null || activeDocument.undoHistory.isEmpty()) return;
         String current = engine.getEditor().getText();
         String previous = activeDocument.undoHistory.remove(activeDocument.undoHistory.size() - 1);
         activeDocument.redoHistory.add(current);
         restoringDocument = true;
-        engine.getEditor().setText(previous, 1);
+        setTextAtChange(current, previous);
         activeDocument.text = previous;
         restoringDocument = false;
         activeDocument.dirty = true;
@@ -649,7 +679,7 @@ public class MainActivity extends AppCompatActivity {
         String next = activeDocument.redoHistory.remove(activeDocument.redoHistory.size() - 1);
         activeDocument.undoHistory.add(current);
         restoringDocument = true;
-        engine.getEditor().setText(next, 1);
+        setTextAtChange(current, next);
         activeDocument.text = next;
         restoringDocument = false;
         activeDocument.dirty = true;
