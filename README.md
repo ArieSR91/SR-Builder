@@ -45,7 +45,7 @@ Optional custom files read from this folder:
 - vehicles.ide
 - opcodes.txt
 - SASCM.ini
-[More](README-SA-MOBILE-CUSTOM-DATA.txt)
+- [More](README-SA-MOBILE-CUSTOM-DATA.txt)
 
 ## Disclaimer
 
