@@ -29,10 +29,5 @@ sa_pc:
     SASCM.INI
     SASCM.NewOpcodes.ini
 
-The three SASCM INI files are loaded as additional opcode definitions for the compiler/editor.
-Opcode IDs already present in the selected built-in opcode database are retained; INI entries can
-add opcode IDs missing from that database. If a custom SASCM.CLEO.ini is absent, the bundled CLEO
-INI is used as a fallback for the PC target.
-
 Copy all SASCM.* and opcodes.txt from Sanny Builder to /sdcard/sr-builder/sa_pc
 If you wanna edit cleo for PC
