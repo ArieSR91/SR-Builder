@@ -29,7 +29,7 @@ android {
         applicationId = "com.ariesr91.builder"
         minSdk = 21
         targetSdk = 35
-        versionCode = 4
+        versionCode = 8
         versionName = "1.3"
     }
 

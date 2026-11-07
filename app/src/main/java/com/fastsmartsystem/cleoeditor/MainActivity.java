@@ -14,6 +14,8 @@ import androidx.annotation.NonNull;
 import androidx.appcompat.app.ActionBarDrawerToggle;
 import androidx.appcompat.app.AlertDialog;
 import androidx.appcompat.app.AppCompatActivity;
+import androidx.core.view.ViewCompat;
+import androidx.core.view.WindowInsetsCompat;
 import androidx.appcompat.widget.Toolbar;
 import androidx.drawerlayout.widget.DrawerLayout;
 
@@ -108,6 +110,7 @@ public class MainActivity extends AppCompatActivity {
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
+        setupKeyboardInsets(findViewById(R.id.linear_layout));
         drawerLayout = findViewById(R.id.drawer);
         toolbar = findViewById(R.id.toolbar);
         documentTabs = findViewById(R.id.document_tabs);
@@ -309,6 +312,47 @@ public class MainActivity extends AppCompatActivity {
             } else {
                 Toast.makeText(this, "Izin baca/tulis diperlukan untuk membuat folder sa_mobile dan membaca file konfigurasi.", Toast.LENGTH_LONG).show();
             }
+        }
+    }
+
+    /**
+     * Lifts the whole content (editor + symbol toolbar) above the soft keyboard.
+     * Edge-to-edge windows (targetSdk 35) are not resized by the keyboard and the
+     * DrawerLayout does not pass the keyboard inset on, so it is applied here as bottom
+     * padding (replacing the nav-bar padding while the keyboard is open).
+     */
+    private int basePaddingBottom = 0;
+
+    private void setupKeyboardInsets(View content) {
+        ViewCompat.setOnApplyWindowInsetsListener(content, (v, insets) -> {
+            WindowInsetsCompat result = ViewCompat.onApplyWindowInsets(v, insets);
+            basePaddingBottom = v.getPaddingBottom(); // padding from fitsSystemWindows
+            applyKeyboardPadding(v);
+            return result;
+        });
+        // Safety net: if the keyboard is shown/hidden without the inset being re-dispatched
+        // to this view, recompute from the root insets after every layout pass.
+        content.getViewTreeObserver().addOnGlobalLayoutListener(() -> applyKeyboardPadding(content));
+        ViewCompat.requestApplyInsets(content);
+    }
+
+    private void applyKeyboardPadding(View v) {
+        WindowInsetsCompat root = ViewCompat.getRootWindowInsets(v);
+        boolean imeVisible = root != null && root.isVisible(WindowInsetsCompat.Type.ime());
+        int bottom = basePaddingBottom;
+        if (imeVisible) {
+            // Measure instead of trusting inset values (they differ between Android
+            // versions / nav modes and left a gap above the keyboard): the content's
+            // inner bottom must land exactly on the top of the keyboard.
+            android.graphics.Rect visible = new android.graphics.Rect();
+            v.getWindowVisibleDisplayFrame(visible);
+            int[] loc = new int[2];
+            v.getLocationOnScreen(loc);
+            int outerBottom = loc[1] + v.getHeight();
+            bottom = Math.max(0, outerBottom - visible.bottom);
+        }
+        if (v.getPaddingBottom() != bottom) {
+            v.setPadding(v.getPaddingLeft(), v.getPaddingTop(), v.getPaddingRight(), bottom);
         }
     }
 
