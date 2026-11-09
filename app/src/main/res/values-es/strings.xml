@@ -65,4 +65,23 @@
     <string name="game_mobile">GTA SA Móvil</string>
     <string name="file_saved">Archivo guardado</string>
     <string name="save_failed">No se pudo guardar el archivo</string>
+
+    <string name="find_text">Buscar</string>
+    <string name="find_title">Buscar</string>
+    <string name="find_label">Buscar texto:</string>
+    <string name="replace_label">Reemplazar con:</string>
+    <string name="find_case_sensitive">Distinguir mayúsculas</string>
+    <string name="find_regex">Expresión regular</string>
+    <string name="find_wrap">Buscar desde el inicio</string>
+    <string name="find_search">Buscar</string>
+    <string name="find_replace">Reemplazar</string>
+    <string name="find_replace_all">Reemplazar todo</string>
+    <string name="find_not_found">No encontrado</string>
+    <string name="find_empty">Introduce el texto a buscar</string>
+    <string name="find_invalid_regex">Expresión regular no válida</string>
+    <string name="find_replaced_count">%1$d reemplazados</string>
+    <string name="find_open_file_first">Abre un archivo primero</string>
+    <string name="find_previous">Anterior</string>
+    <string name="find_next">Siguiente</string>
+    <string name="find_close">Cerrar búsqueda</string>
 </resources>

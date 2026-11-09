@@ -28,6 +28,12 @@
                 android:icon="@drawable/ic_search"
                 android:title="@string/search_opcode"
                 app:showAsAction="ifRoom"/>
+
+            <item
+                android:id="@+id/find_text"
+                android:icon="@drawable/ic_search"
+                android:title="@string/find_text"
+                app:showAsAction="ifRoom"/>
         </menu>
 
     </item>

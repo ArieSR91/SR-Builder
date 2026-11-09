@@ -64,4 +64,23 @@
     <string name="game_mobile">GTA SA Mobile</string>
     <string name="file_saved">File saved</string>
     <string name="save_failed">Unable to save file</string>
+
+    <string name="find_text">Find</string>
+    <string name="find_title">Find</string>
+    <string name="find_label">Find text:</string>
+    <string name="replace_label">Replace with:</string>
+    <string name="find_case_sensitive">Case sensitive</string>
+    <string name="find_regex">Regular expression</string>
+    <string name="find_wrap">Wrap around</string>
+    <string name="find_search">Find</string>
+    <string name="find_replace">Replace</string>
+    <string name="find_replace_all">Replace all</string>
+    <string name="find_not_found">Not found</string>
+    <string name="find_empty">Enter the text to find</string>
+    <string name="find_invalid_regex">Invalid regular expression</string>
+    <string name="find_replaced_count">%1$d replaced</string>
+    <string name="find_open_file_first">Open a file first</string>
+    <string name="find_previous">Previous</string>
+    <string name="find_next">Next</string>
+    <string name="find_close">Close search</string>
 </resources>

@@ -66,4 +66,23 @@
     <string name="game_mobile">GTA SA Mobile</string>
     <string name="file_saved">File berhasil disimpan</string>
     <string name="save_failed">Tidak dapat menyimpan file</string>
+
+    <string name="find_text">Cari</string>
+    <string name="find_title">Cari</string>
+    <string name="find_label">Cari teks:</string>
+    <string name="replace_label">Ganti dengan:</string>
+    <string name="find_case_sensitive">Kasus sensitif</string>
+    <string name="find_regex">Persamaan reguler</string>
+    <string name="find_wrap">Membungkus di sekitar</string>
+    <string name="find_search">Cari</string>
+    <string name="find_replace">Ganti</string>
+    <string name="find_replace_all">Ganti semua</string>
+    <string name="find_not_found">Tidak ditemukan</string>
+    <string name="find_empty">Masukkan teks yang dicari</string>
+    <string name="find_invalid_regex">Persamaan reguler tidak valid</string>
+    <string name="find_replaced_count">%1$d teks diganti</string>
+    <string name="find_open_file_first">Buka file terlebih dahulu</string>
+    <string name="find_previous">Sebelumnya</string>
+    <string name="find_next">Berikutnya</string>
+    <string name="find_close">Tutup pencarian</string>
 </resources>

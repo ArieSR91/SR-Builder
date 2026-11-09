@@ -27,6 +27,7 @@ import android.view.Menu;
 import android.view.MenuItem;
 import android.view.View;
 import android.widget.Button;
+import android.widget.CheckBox;
 import android.widget.HorizontalScrollView;
 import android.widget.LinearLayout;
 import android.widget.TextView;
@@ -147,6 +148,18 @@ public class MainActivity extends AppCompatActivity {
     @Override
     public boolean onOptionsItemSelected(@NonNull MenuItem item) {
         final int menuItemId = item.getItemId();
+        if (searchMode) {
+            // While searching, the four toolbar buttons are: close / previous / next / replace.
+            if (menuItemId == R.id.code_errors) exitSearchMode();
+            else if (menuItemId == R.id.undo) findMatch(false);
+            else if (menuItemId == R.id.redo) findMatch(true);
+            else if (menuItemId == R.id.save_current) {
+                if (searchReplaceEnabled) replaceCurrent();
+                else saveCurrentDocument();
+            }
+            else return super.onOptionsItemSelected(item);
+            return true;
+        }
         if (menuItemId == R.id.undo) {
             undoActiveDocument();
         }
@@ -468,6 +481,8 @@ public class MainActivity extends AppCompatActivity {
                     } else if (itemId == R.id.search) {
                         Intent intent = new Intent(MainActivity.this, SearchOpcodeActivity.class);
                         startActivity(intent);
+                    } else if (itemId == R.id.find_text) {
+                        showFindDialog();
                     } else if (itemId == R.id.compile) {
                         performFunction(COMPILE);
                     } else if (itemId == R.id.decompile) {
@@ -627,6 +642,8 @@ public class MainActivity extends AppCompatActivity {
         menu.findItem(R.id.undo).setVisible(hasOpenDocument);
         menu.findItem(R.id.redo).setVisible(hasOpenDocument);
         menu.findItem(R.id.save_current).setVisible(hasOpenDocument);
+        if (!hasOpenDocument) searchMode = false;
+        applySearchToolbar();
     }
 
     /**
@@ -687,6 +704,292 @@ public class MainActivity extends AppCompatActivity {
         refreshDocumentTabs();
     }
 
+    // region FIND / REPLACE
+
+    private boolean searchMode = false;
+    /** True only when search mode was entered through the dialog's Replace button. */
+    private boolean searchReplaceEnabled = false;
+    private String searchQuery = "";
+    private String searchReplace = "";
+    private boolean searchCase = false;
+    private boolean searchRegex = false;
+    private boolean searchWrap = true;
+
+    private com.github.ahmadaghazadeh.editor.processor.TextProcessor searchTarget() {
+        return engine.getEditor().getTextProcessor();
+    }
+
+    /** Swaps the toolbar buttons between normal mode and search mode. */
+    private void applySearchToolbar() {
+        if (menu == null) return;
+        MenuItem close = menu.findItem(R.id.code_errors);
+        MenuItem prev = menu.findItem(R.id.undo);
+        MenuItem next = menu.findItem(R.id.redo);
+        MenuItem replace = menu.findItem(R.id.save_current);
+        if (searchMode) {
+            close.setIcon(R.drawable.ic_find_close).setTitle(R.string.find_close);
+            prev.setIcon(R.drawable.ic_find_prev).setTitle(R.string.find_previous);
+            next.setIcon(R.drawable.ic_find_next).setTitle(R.string.find_next);
+            if (searchReplaceEnabled) {
+                replace.setIcon(R.drawable.ic_find_replace).setTitle(R.string.find_replace);
+            } else {
+                replace.setIcon(R.drawable.ic_save_current).setTitle(R.string.save);
+            }
+        } else {
+            close.setTitle(R.string.code_errors);
+            prev.setIcon(R.drawable.ic_undo).setTitle(R.string.undo);
+            next.setIcon(R.drawable.ic_redo).setTitle(R.string.redo);
+            replace.setIcon(R.drawable.ic_save_current).setTitle(R.string.save);
+            updateMenuIcon();
+        }
+    }
+
+    private void enterSearchMode(boolean withReplace) {
+        searchMode = true;
+        searchReplaceEnabled = withReplace;
+        applySearchToolbar();
+    }
+
+    private void exitSearchMode() {
+        searchMode = false;
+        searchReplaceEnabled = false;
+        applySearchToolbar();
+    }
+
+    private java.util.regex.Pattern buildSearchPattern() {
+        if (searchQuery.isEmpty()) return null;
+        int flags = searchCase ? 0
+                : (java.util.regex.Pattern.CASE_INSENSITIVE | java.util.regex.Pattern.UNICODE_CASE);
+        try {
+            if (searchRegex) {
+                return java.util.regex.Pattern.compile(searchQuery,
+                        flags | java.util.regex.Pattern.MULTILINE);
+            }
+            return java.util.regex.Pattern.compile(java.util.regex.Pattern.quote(searchQuery), flags);
+        } catch (java.util.regex.PatternSyntaxException e) {
+            Toast.makeText(this, R.string.find_invalid_regex, Toast.LENGTH_SHORT).show();
+            return null;
+        }
+    }
+
+    private void showFindDialog() {
+        if (activeDocument == null) {
+            Toast.makeText(this, R.string.find_open_file_first, Toast.LENGTH_SHORT).show();
+            return;
+        }
+        final com.github.ahmadaghazadeh.editor.processor.TextProcessor tp = searchTarget();
+        // Pre-fill with the selected word when there is a short single-line selection.
+        int a = Math.min(tp.getSelectionStart(), tp.getSelectionEnd());
+        int b = Math.max(tp.getSelectionStart(), tp.getSelectionEnd());
+        if (a >= 0 && b > a && b - a <= 100) {
+            String sel = tp.getText().subSequence(a, b).toString();
+            if (sel.indexOf('\n') < 0) searchQuery = sel;
+        }
+
+        View view = getLayoutInflater().inflate(R.layout.dialog_find, null);
+        final EditText etFind = view.findViewById(R.id.find_query);
+        final EditText etReplace = view.findViewById(R.id.find_replace_text);
+        final CheckBox cbCase = view.findViewById(R.id.find_case);
+        final CheckBox cbRegex = view.findViewById(R.id.find_regex);
+        final CheckBox cbWrap = view.findViewById(R.id.find_wrap);
+        etFind.setText(searchQuery);
+        etFind.setSelection(etFind.getText().length());
+        etReplace.setText(searchReplace);
+        cbCase.setChecked(searchCase);
+        cbRegex.setChecked(searchRegex);
+        cbWrap.setChecked(searchWrap);
+
+        final AlertDialog dialog = new AlertDialog.Builder(this)
+                .setTitle(R.string.find_title)
+                .setView(view)
+                .setPositiveButton(R.string.find_search, null)
+                .setNegativeButton(R.string.find_replace, null)
+                .setNeutralButton(R.string.find_replace_all, null)
+                .create();
+        if (dialog.getWindow() != null) {
+            dialog.getWindow().setSoftInputMode(
+                    android.view.WindowManager.LayoutParams.SOFT_INPUT_STATE_VISIBLE
+                            | android.view.WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE);
+        }
+        dialog.setOnShowListener(d -> {
+            // 0 = find, 1 = replace, 2 = replace all. Overridden so the dialog stays open on errors.
+            final int[] kinds = {0, 1, 2};
+            final int[] buttons = {AlertDialog.BUTTON_POSITIVE, AlertDialog.BUTTON_NEGATIVE,
+                    AlertDialog.BUTTON_NEUTRAL};
+            for (int i = 0; i < 3; i++) {
+                final int kind = kinds[i];
+                dialog.getButton(buttons[i]).setOnClickListener(v -> {
+                    searchQuery = etFind.getText().toString();
+                    searchReplace = etReplace.getText().toString();
+                    searchCase = cbCase.isChecked();
+                    searchRegex = cbRegex.isChecked();
+                    searchWrap = cbWrap.isChecked();
+                    if (searchQuery.isEmpty()) {
+                        etFind.setError(getString(R.string.find_empty));
+                        return;
+                    }
+                    boolean ok;
+                    if (kind == 2) {
+                        ok = replaceAll();
+                    } else {
+                        ok = kind == 0 ? findMatch(true) : replaceCurrent();
+                        if (ok) enterSearchMode(kind == 1);
+                    }
+                    if (ok) dialog.dismiss();
+                });
+            }
+        });
+        dialog.show();
+    }
+
+    /** Selects the next/previous match relative to the current selection. */
+    private boolean findMatch(boolean forward) {
+        java.util.regex.Pattern pattern = buildSearchPattern();
+        if (pattern == null) return false;
+        final com.github.ahmadaghazadeh.editor.processor.TextProcessor tp = searchTarget();
+        String text = tp.getText().toString();
+        int selStart = Math.min(tp.getSelectionStart(), tp.getSelectionEnd());
+        int selEnd = Math.max(tp.getSelectionStart(), tp.getSelectionEnd());
+        if (selStart < 0) { selStart = 0; selEnd = 0; }
+
+        int[] found;
+        if (forward) {
+            found = firstMatchFrom(pattern, text, selEnd);
+            if (found == null && searchWrap) found = firstMatchFrom(pattern, text, 0);
+        } else {
+            found = lastMatchBefore(pattern, text, selStart);
+            if (found == null && searchWrap) found = lastMatchBefore(pattern, text, text.length() + 1);
+        }
+        if (found == null) {
+            Toast.makeText(this, R.string.find_not_found, Toast.LENGTH_SHORT).show();
+            return false;
+        }
+        revealRange(found[0], found[1]);
+        return true;
+    }
+
+    private int[] firstMatchFrom(java.util.regex.Pattern pattern, String text, int from) {
+        java.util.regex.Matcher m = pattern.matcher(text);
+        while (from <= text.length() && m.find(from)) {
+            if (m.end() > m.start()) return new int[]{m.start(), m.end()};
+            from = m.end() + 1; // skip empty regex matches
+        }
+        return null;
+    }
+
+    private int[] lastMatchBefore(java.util.regex.Pattern pattern, String text, int limit) {
+        java.util.regex.Matcher m = pattern.matcher(text);
+        int[] last = null;
+        while (m.find()) {
+            if (m.start() >= limit) break;
+            if (m.end() > m.start()) last = new int[]{m.start(), m.end()};
+        }
+        return last;
+    }
+
+    /** Replaces the selected match (if the selection is a match) and jumps to the next one. */
+    private boolean replaceCurrent() {
+        java.util.regex.Pattern pattern = buildSearchPattern();
+        if (pattern == null) return false;
+        final com.github.ahmadaghazadeh.editor.processor.TextProcessor tp = searchTarget();
+        String text = tp.getText().toString();
+        int start = Math.min(tp.getSelectionStart(), tp.getSelectionEnd());
+        int end = Math.max(tp.getSelectionStart(), tp.getSelectionEnd());
+        if (start >= 0 && end > start) {
+            java.util.regex.Matcher m = pattern.matcher(text);
+            m.region(start, end);
+            m.useTransparentBounds(true);
+            m.useAnchoringBounds(false);
+            if (m.matches()) {
+                String replacement = searchReplace;
+                if (searchRegex) {
+                    try {
+                        StringBuffer sb = new StringBuffer();
+                        m.reset();
+                        m.region(start, end);
+                        m.useTransparentBounds(true);
+                        m.useAnchoringBounds(false);
+                        if (m.lookingAt()) {
+                            m.appendReplacement(sb, searchReplace);
+                            replacement = sb.substring(start); // drop the text before the region
+                        }
+                    } catch (RuntimeException e) {
+                        replacement = searchReplace; // bad group reference: use it literally
+                    }
+                }
+                tp.getEditableText().replace(start, end, replacement);
+                tp.setSelection(start + replacement.length());
+            }
+        }
+        return findMatch(true);
+    }
+
+    private boolean replaceAll() {
+        java.util.regex.Pattern pattern = buildSearchPattern();
+        if (pattern == null) return false;
+        final com.github.ahmadaghazadeh.editor.processor.TextProcessor tp = searchTarget();
+        String text = tp.getText().toString();
+        java.util.regex.Matcher m = pattern.matcher(text);
+        StringBuffer sb = new StringBuffer();
+        int count = 0;
+        try {
+            while (m.find()) {
+                if (m.end() == m.start()) continue;
+                m.appendReplacement(sb, searchRegex ? searchReplace
+                        : java.util.regex.Matcher.quoteReplacement(searchReplace));
+                count++;
+            }
+        } catch (RuntimeException e) {
+            Toast.makeText(this, R.string.find_invalid_regex, Toast.LENGTH_SHORT).show();
+            return false;
+        }
+        if (count == 0) {
+            Toast.makeText(this, R.string.find_not_found, Toast.LENGTH_SHORT).show();
+            return false;
+        }
+        m.appendTail(sb);
+        final int oldCaret = Math.max(0, tp.getSelectionStart());
+        final int scrollX = tp.getScrollX();
+        final int scrollY = tp.getScrollY();
+        tp.getEditableText().replace(0, tp.length(), sb.toString());
+        tp.post(() -> {
+            tp.setSelection(Math.min(oldCaret, tp.length()));
+            tp.scrollTo(scrollX, scrollY);
+        });
+        Toast.makeText(this, getString(R.string.find_replaced_count, count), Toast.LENGTH_SHORT).show();
+        return true;
+    }
+
+    /** Selects [start, end) and scrolls it into view (only if it is currently off-screen). */
+    private void revealRange(final int start, final int end) {
+        final com.github.ahmadaghazadeh.editor.processor.TextProcessor tp = searchTarget();
+        tp.requestFocus(); // the selection highlight is only drawn while the editor has focus
+        tp.setSelection(start, end);
+        tp.post(() -> {
+            android.text.Layout layout = tp.getLayout();
+            if (layout == null) return;
+            int line = layout.getLineForOffset(start);
+            int visibleHeight = tp.getHeight() - tp.getCompoundPaddingTop() - tp.getCompoundPaddingBottom();
+            int maxScrollY = Math.max(0, layout.getHeight() - visibleHeight);
+            int newY = tp.getScrollY();
+            if (layout.getLineTop(line) < newY || layout.getLineBottom(line) > newY + visibleHeight) {
+                newY = Math.max(0, Math.min(maxScrollY, layout.getLineTop(line) - visibleHeight / 3));
+            }
+            int maxScrollX = Math.max(0, layout.getWidth() - tp.getWidth()
+                    + tp.getPaddingLeft() + tp.getPaddingRight());
+            int newX = tp.getScrollX();
+            float xs = layout.getPrimaryHorizontal(start) + tp.getCompoundPaddingLeft();
+            float xe = layout.getPrimaryHorizontal(Math.min(end, layout.getLineVisibleEnd(line)))
+                    + tp.getCompoundPaddingLeft();
+            if (xs - newX < tp.getCompoundPaddingLeft() || xe - newX > tp.getWidth() - dp(8)) {
+                newX = Math.max(0, Math.min(maxScrollX, Math.round(xs) - tp.getWidth() / 4));
+            }
+            tp.scrollTo(newX, newY);
+        });
+    }
+
+    // endregion FIND / REPLACE
+
     private int dp(float value) {
         return (int) (value * getResources().getDisplayMetrics().density + 0.5f);
     }
@@ -720,7 +1023,7 @@ public class MainActivity extends AppCompatActivity {
     }
 
     public void updateMenuIcon() {
-        if(menu != null) {
+        if(menu != null && !searchMode) {
             if(engine.hasErrors()) {
                 menu.findItem(R.id.code_errors).setIcon(R.drawable.ic_error);
             } else {
